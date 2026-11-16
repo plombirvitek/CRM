@@ -318,7 +318,10 @@ const bounds = m => { const [y, mo] = m.split('-').map(Number); return [m + '-01
 const monthLabel = m => { const [y, mo] = m.split('-').map(Number); return MONTHS[mo - 1] + ' ' + y; };
 const dmy = s => s ? s.slice(8, 10) + '.' + s.slice(5, 7) + '.' + s.slice(0, 4) : '';
 const plural = (n, a, b, c) => { const k = Math.abs(n) % 100, j = k % 10; return (k > 10 && k < 20) ? c : j === 1 ? a : (j >= 2 && j <= 4) ? b : c; };
-const KIND = {company: 'служебный', personal: 'личный'};
+const KIND = {company: 'служебный', rent: 'личный, аренда', personal: 'личный'};
+// Приказ о нормах ГСМ: летняя норма с 01.04 по 01.11, в остальное время зимняя.
+const isSummer = month => { const m = +String(month).split('-')[1]; return m >= 4 && m <= 10; };
+const normFor = (d, month) => { if (!d) return null; const v = isSummer(month) ? num(d.normSummer) : num(d.normWinter); return v != null ? v : num(d.norm); };
 function toast(text) { const t = $('#toast'); t.textContent = text; t.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => t.hidden = true, 3200); }
 function banner(text) { const b = $('#banner'); b.textContent = text || ''; b.hidden = !text; }
 
@@ -414,7 +417,7 @@ function onDrivers() {
   if (want !== S.driverId) { S.driverId = want; openSheet(); }
   else if (S.sheet) {
     const d = driver();
-    if (d && !S.exists && !S.dirty && S.sheet.norm == null && d.norm != null) S.sheet.norm = num(d.norm);
+    if (d && !S.exists && !S.dirty && S.sheet.norm == null && normFor(d, S.month) != null) S.sheet.norm = normFor(d, S.month);
     renderCar(); recalc();
   } else if (!want) renderSheet();
   if (want) sel.value = want;
@@ -449,7 +452,7 @@ async function openSheet() {
 }
 function blankSheet(driverId, month) {
   const d = S.drivers.find(x => x.id === driverId);
-  return normSheet({norm: d ? d.norm : null}, driverId, month);
+  return normSheet({norm: normFor(d, month)}, driverId, month);
 }
 async function prefill(token, driverId, month) {
   // Остаток и норма переносятся из листа за прошлый месяц, если он есть.
@@ -458,7 +461,7 @@ async function prefill(token, driverId, month) {
     if (token !== S.token || !snap.exists || S.exists || S.dirty || !S.sheet) return;
     const prev = normSheet(snap.data(), driverId, shiftMonth(month, -1)), pc = calc(prev);
     let changed = false;
-    if (S.sheet.norm == null && prev.norm != null) { S.sheet.norm = prev.norm; changed = true; }
+    if (S.sheet.norm == null && normFor(driver(), month) == null && prev.norm != null) { S.sheet.norm = prev.norm; changed = true; }
     if (S.sheet.fuelStart == null && pc.end != null) { S.sheet.fuelStart = pc.end; S.carried = true; changed = true; }
     if (changed) { renderCar(); recalc(); }
   } catch (e) {}
@@ -528,12 +531,12 @@ function renderBar() {
 function renderCar() {
   const d = driver(), sh = S.sheet, el = $('#car'); if (!el || !d || !sh) return;
   const dis = locked() ? ' disabled' : '';
-  const sub = [d.fuel, d.card ? 'топливная карта № ' + d.card : 'топливная карта не указана', d.tank != null ? 'бак ' + fL(num(d.tank)) + ' л' : ''].filter(Boolean).map(esc).join(' · ');
+  const sub = [d.engine ? fKm(num(d.engine)) + ' см³' : '', d.basis || '', d.fuel, d.card ? 'топливная карта № ' + d.card : 'топливная карта не указана', d.tank != null ? 'бак ' + fL(num(d.tank)) + ' л' : ''].filter(Boolean).map(esc).join(' · ');
   el.innerHTML = '<div class="car"><div class="carinfo"><div class="carname">' + esc(d.car || 'Автомобиль не указан') +
     (d.plate ? ' <span class="plate">' + esc(d.plate) + '</span>' : '') +
     ' <span class="chip ' + (d.kind === 'company' ? 'acc' : '') + '">' + (KIND[d.kind] || 'личный') + '</span>' + (d.demo ? ' <span class="chip warn">пример</span>' : '') + '</div>' +
     '<div class="carsub">' + sub + '</div></div>' +
-    '<label class="fld" for="norm"><span>Норма расхода, л/100 км</span><input id="norm" class="num" inputmode="decimal" autocomplete="off" value="' + (sh.norm ?? '') + '" placeholder="внесём позже"' + dis + '><em></em></label>' +
+    '<label class="fld" for="norm"><span>Норма расхода, л/100 км' + (normFor(d, S.month) != null ? ' (' + (isSummer(S.month) ? 'летняя' : 'зимняя') + ')' : '') + '</span><input id="norm" class="num" inputmode="decimal" autocomplete="off" value="' + (sh.norm ?? '') + '" placeholder="внесём позже"' + dis + '><em></em></label>' +
     '<label class="fld" for="fuelStart"><span>Остаток на начало месяца, л</span><input id="fuelStart" class="num" inputmode="decimal" autocomplete="off" value="' + (sh.fuelStart ?? '') + '"' + dis + '><em>' + (S.carried ? 'перенесён из прошлого месяца' : '') + '</em></label></div>';
 }
 function tripRow(t) {
@@ -666,11 +669,13 @@ function driverForm(d) {
     '<label class="fld wide" for="d-name"><span>ФИО</span><input id="d-name" required value="' + esc(v.name) + '"></label>' +
     '<label class="fld" for="d-car"><span>Автомобиль (марка, модель)</span><input id="d-car" value="' + esc(v.car) + '"></label>' +
     '<label class="fld" for="d-plate"><span>Госномер</span><input id="d-plate" value="' + esc(v.plate) + '"></label>' +
-    '<label class="fld" for="d-kind"><span>Автомобиль</span><select id="d-kind"><option value="company"' + (v.kind === 'company' ? ' selected' : '') + '>служебный</option><option value="personal"' + (v.kind !== 'company' ? ' selected' : '') + '>личный</option></select></label>' +
+    '<label class="fld" for="d-kind"><span>Автомобиль</span><select id="d-kind">' + Object.entries(KIND).map(([k, t]) => '<option value="' + k + '"' + ((v.kind || 'personal') === k ? ' selected' : '') + '>' + t + '</option>').join('') + '</select></label>' +
+    '<label class="fld" for="d-engine"><span>Объём двигателя, см³</span><input id="d-engine" class="num" inputmode="numeric" value="' + (v.engine ?? '') + '"></label>' +
     '<label class="fld" for="d-fuel"><span>Топливо</span><select id="d-fuel">' + fuels.map(f => '<option' + (f === v.fuel ? ' selected' : '') + '>' + esc(f) + '</option>').join('') + '</select></label>' +
     '<label class="fld" for="d-card"><span>Топливная карта №</span><input id="d-card" inputmode="numeric" value="' + esc(v.card) + '"></label>' +
     '<label class="fld" for="d-tank"><span>Объём бака, л</span><input id="d-tank" class="num" inputmode="decimal" value="' + (v.tank ?? '') + '"></label>' +
-    '<label class="fld wide" for="d-norm"><span>Норма расхода, л/100 км (подставляется в новые листы)</span><input id="d-norm" class="num" inputmode="decimal" value="' + (v.norm ?? '') + '" placeholder="можно внести позже"></label>' +
+    '<label class="fld" for="d-ns"><span>Норма летняя, л/100 км (апрель–октябрь)</span><input id="d-ns" class="num" inputmode="decimal" value="' + (v.normSummer ?? v.norm ?? '') + '" placeholder="по приказу"></label>' +
+    '<label class="fld" for="d-nw"><span>Норма зимняя, л/100 км (ноябрь–март)</span><input id="d-nw" class="num" inputmode="decimal" value="' + (v.normWinter ?? v.norm ?? '') + '" placeholder="по приказу"></label>' +
     '<div class="actions"><div>' + (d ? '<button type="button" class="btn danger" id="d-del">Удалить водителя</button>' : '') + '</div>' +
     '<div class="row"><button type="button" class="btn" data-act="close">Отмена</button><button type="submit" class="btn pri">Сохранить</button></div></div></form></div>';
   $('#modal').hidden = false; $('#d-name').focus();
@@ -678,7 +683,8 @@ function driverForm(d) {
     e.preventDefault();
     const name = $('#d-name').value.trim(); if (!name) { $('#d-name').classList.add('bad'); $('#d-name').focus(); return; }
     const body = {name, car: $('#d-car').value.trim(), plate: $('#d-plate').value.trim(), kind: $('#d-kind').value, fuel: $('#d-fuel').value,
-      card: $('#d-card').value.trim(), tank: num($('#d-tank').value), norm: num($('#d-norm').value)};
+      card: $('#d-card').value.trim(), tank: num($('#d-tank').value), engine: num($('#d-engine').value), normSummer: num($('#d-ns').value), normWinter: num($('#d-nw').value)};
+    if (d && d.basis) body.basis = d.basis;
     if (d && d.demo) body.demo = true;
     try {
       if (S.db) { const ref = d ? S.db.collection('drivers').doc(d.id) : S.db.collection('drivers').doc(); if (!d) S.driverId = ref.id; await ref.set(body); if (!d) openSheet(); }
