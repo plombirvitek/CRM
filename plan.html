@@ -342,13 +342,26 @@ function refreshNums(pid,m,r){
  renderKpis();
 }
 
+function mgrQL(r,m){const q=[0,0,0,0];for(const p of CAT){const v=lit(r,p.id,m);if(v)season4(p.group).forEach((w,k)=>q[k]+=v*w/100)}return q}
 function vQuarters(){
- const all=region==='all';const units=all?REGIONS.map(r=>({lab:r.name+' ('+r.city+')',qs:r.mgrs.map(m=>mgrQ(r.id,m)).reduce((a,b)=>a.map((x,i)=>x+b[i]),[0,0,0,0])})):regOf(region).mgrs.map(m=>({lab:m,qs:mgrQ(region,m)}));
- const tot=[0,0,0,0];units.forEach(u=>u.qs.forEach((x,k)=>tot[k]+=x));const T=tot.reduce((a,b)=>a+b,0);
- const row=(lab,q,b)=>`<tr${b?' class="tot"':''}><td class="l">${esc(lab)}</td>${q.map(x=>`<td>${x?mln(x):'<span class="muted">—</span>'}</td>`).join('')}<td><b>${mln(q.reduce((a,b)=>a+b,0))}</b></td></tr>`;
- const bar=T?`<div class="qbar">${tot.map((x,k)=>x?`<div style="width:${x/T*100}%;background:${QCOL[k]};color:${k?'#fff':'#4a1518'}">${k+1} кв · ${Math.round(x/T*100)}%</div>`:'').join('')}</div>`:'';
- return `<div class="tbl" style="max-height:none"><table><thead><tr><th class="l">${all?'Область':'Менеджер'}</th><th>1 квартал</th><th>2 квартал</th><th>3 квартал</th><th>4 квартал</th><th>Год</th></tr></thead><tbody>${units.map(u=>row(u.lab,u.qs)).join('')}</tbody><tfoot>${row(all?'Компания':'Область',tot,true)}</tfoot></table></div>${bar}
- <p class="muted" style="font-size:13px;margin-top:12px">Кварталы раскладываются по сезонности группы препарата (вкладка «Цели и сезонность»). Факт и перенос недобора на следующий квартал подключатся из сделок после переноса в CRM; в выгрузке Excel факт можно вписать вручную.</p>`;
+ const all=region==='all';const add=(a,b)=>a.map((x,i)=>x+b[i]);
+ const units=all?REGIONS.map(r=>({lab:r.name+' ('+r.city+')',ql:r.mgrs.map(m=>mgrQL(r.id,m)).reduce(add,[0,0,0,0]),qs:r.mgrs.map(m=>mgrQ(r.id,m)).reduce(add,[0,0,0,0])})):regOf(region).mgrs.map(m=>({lab:m,ql:mgrQL(region,m),qs:mgrQ(region,m)}));
+ const totL=units.map(u=>u.ql).reduce(add,[0,0,0,0]),totS=units.map(u=>u.qs).reduce(add,[0,0,0,0]);
+ const TL=totL.reduce((a,b)=>a+b,0),TS=totS.reduce((a,b)=>a+b,0),hasS=TS>0;
+ const cell=(l,sv)=>l?`${fmt(l)}${hasS?`<div class="sub">${sv?mln(sv):'—'}</div>`:''}`:'<span class="muted">—</span>';
+ const row=(lab,ql,qs,b)=>`<tr${b?' class="tot"':''}><td class="l">${esc(lab)}</td>${ql.map((x,k)=>`<td>${cell(x,qs[k])}</td>`).join('')}<td><b>${cell(ql.reduce((a,c)=>a+c,0),qs.reduce((a,c)=>a+c,0))}</b></td></tr>`;
+ const base=hasS?totS:totL,BT=hasS?TS:TL;
+ const bar=BT?`<div class="qbar">${base.map((x,k)=>x?`<div style="width:${x/BT*100}%;background:${QCOL[k]};color:${k?'#fff':'#4a1518'}">${k+1} кв · ${Math.round(x/BT*100)}%</div>`:'').join('')}</div>`:'';
+ const head=f=>`<thead><tr><th class="l">${f}</th><th>1 квартал</th><th>2 квартал</th><th>3 квартал</th><th>4 квартал</th><th>Год</th></tr></thead>`;
+ const t1=`<div class="tbl" style="max-height:none"><table>${head(all?'Область':'Менеджер')}<tbody>${units.map(u=>row(u.lab,u.ql,u.qs)).join('')}</tbody><tfoot>${row(all?'Компания':'Область',totL,totS,true)}</tfoot></table></div>`;
+ let prows='';
+ for(const g of GROUPS){const ps=CAT.filter(p=>p.group===g&&prodTot(p.id));if(!ps.length)continue;const w=season4(g);
+  const gl=[0,0,0,0],gs=[0,0,0,0];
+  const rr=ps.map(p=>{const L=prodTot(p.id),ql=w.map(x=>L*x/100),qs=ql.map(x=>x*price(p));ql.forEach((x,k)=>{gl[k]+=x;gs[k]+=qs[k]});return row(p.name+(p.unit?', '+p.unit:''),ql,qs)}).join('');
+  prows+=`<tr class="grp"><td class="l" colspan="6">${gIco(g)} <b>${esc(g)}</b> <span class="muted">· ${w.join(' / ')} %</span></td></tr>`+rr+row('Итого '+g.toLowerCase(),gl,gs,true);}
+ const t2=prows?`<h3 style="margin-top:22px">По препаратам, л/кг${hasS?' и ₸':''}</h3><div class="tbl" style="max-height:none"><table>${head('Препарат')}<tbody>${prows}</tbody></table></div>`:'';
+ return `<h3>По ${all?'областям':'менеджерам'}, л/кг${hasS?' и ₸':''}</h3>${t1}${bar}${t2}
+ <p class="muted" style="font-size:13px;margin-top:12px">Литры раскладываются по кварталам по сезонности группы препарата (вкладка «Цели и сезонность»).${hasS?'':' Суммы в тенге появятся, когда в справочник будут внесены цены.'} Факт и перенос недобора на следующий квартал подключатся из сделок.</p>`;
 }
 
 function vGoals(){
