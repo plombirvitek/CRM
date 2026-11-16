@@ -732,7 +732,7 @@ function rebuild(c){
     if(c==='districts')S.districts=S.districts.filter(d=>d.region===hr);
     else S[c]=S[c].filter(d=>TEAM.has(mgrOf(c,d))||(d._u===myUid&&!mgrOf(c,d)));
   }
-  else if(c==='districts'){const ar=myArea();if(ar)S.districts=S.districts.filter(d=>d.region===ar||mineDist(d))}
+  else if(c==='districts'&&!isAdm()){const ar=myArea(),me0=myReg&&myReg.manager;S.districts=S.districts.filter(d=>(ar&&d.region===ar)||mineDist(d)||(me0&&parseManagers(d.managerRaw||'').includes(me0)))}
   if(!isAdm()||!viewAs)return;
   if(c==='districts'){const va={...AREA_DEF,...(ORG().area||{})}[viewAs]||'';S.districts=S.districts.filter(d=>parseManagers(d.managerRaw||'').includes(viewAs)||(va&&d.region===va))}
   else S[c]=S[c].filter(d=>mgrOf(c,d)===viewAs);
@@ -791,8 +791,8 @@ function ensureSubs(){
   SHARED.forEach(c=>sub(c,'shared'));
   const us=new Set([myUid]);if(isAdm()){REG.forEach(r=>us.add(r.id));if(ORG().ownerUid)us.add(ORG().ownerUid);(ORG().ownerUids||[]).forEach(u=>us.add(u))}
   us.forEach(u=>PERS.forEach(c=>sub(c,u)));
-  /* закреплена область — подписываемся только на карточки районов остальных кабинетов, журнал остаётся свой */
-  if(!isAdm()&&myArea()){const du=new Set(REG.map(r=>r.id));if(ORG().ownerUid)du.add(ORG().ownerUid);(ORG().ownerUids||[]).forEach(u=>du.add(u));du.forEach(u=>{if(u!==myUid)sub('districts',u)})}
+  /* менеджер видит все хозяйства своих районов: подписываемся на карточки районов всех кабинетов (только чтение), журнал остаётся свой */
+  if(!isAdm()){const du=new Set(REG.map(r=>r.id));if(ORG().ownerUid)du.add(ORG().ownerUid);(ORG().ownerUids||[]).forEach(u=>du.add(u));du.forEach(u=>{if(u!==myUid)sub('districts',u)})}
 }
 function checkReady(){
   if(ready)return;
@@ -1845,7 +1845,7 @@ let fStore={};
 function rebuildFarms(id,us){
   const seen=new Set(),out=[];
   for(const u of us)for(const f of (fStore[u]||[])){if(seen.has(f.id))continue;seen.add(f.id);out.push({...f,_u:u})}
-  FARMS=(isAdm()&&viewAs)?out.filter(f=>{const mg=parseManagers(f.manager||'');return !mg.length||mg.includes(viewAs)}):out;
+  FARMS=out;
 }
 function openDistrict(id,q){
   dist=id; ff={q:q||'',stage:'',mgr:'',set:'',risk:'',sk:'',sd:1,lim:300};
