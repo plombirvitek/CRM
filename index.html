@@ -734,7 +734,7 @@ function rebuild(c){
   }
   else if(c==='districts'){const ar=myArea();if(ar)S.districts=S.districts.filter(d=>d.region===ar||mineDist(d))}
   if(!isAdm()||!viewAs)return;
-  if(c==='districts')S.districts=S.districts.filter(d=>parseManagers(d.managerRaw||'').includes(viewAs));
+  if(c==='districts'){const va={...AREA_DEF,...(ORG().area||{})}[viewAs]||'';S.districts=S.districts.filter(d=>parseManagers(d.managerRaw||'').includes(viewAs)||(va&&d.region===va))}
   else S[c]=S[c].filter(d=>mgrOf(c,d)===viewAs);
 }
 function rebuild0(c){
