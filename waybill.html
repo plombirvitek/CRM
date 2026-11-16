@@ -1,0 +1,796 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<script>/* Слой данных: Supabase вместо базы Claude. Тот же интерфейс window.claude.use('db'|'user'|'downloads'|'mcp'). */
+(()=>{
+const URL_='https://teysgklvfzzfdozdtqkd.supabase.co',PUB='sb_publishable_Urb9ajGZ_a-G-uCnXAPLqw_6xNe6_jC';
+const SK='crm_sb_session';let sess=null,prof=null,loginP=null;
+const lsGet=k=>{try{return localStorage.getItem(k)}catch(e){return null}},lsSet=(k,v)=>{try{v==null?localStorage.removeItem(k):localStorage.setItem(k,v)}catch(e){}};
+async function auth(grant,body){
+  const r=await fetch(URL_+'/auth/v1/token?grant_type='+grant,{method:'POST',headers:{apikey:PUB,'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const j=await r.json();if(!r.ok)throw new Error(j.error_description||j.msg||j.error||'Ошибка входа');
+  sess={at:j.access_token,rt:j.refresh_token,exp:Date.now()+(j.expires_in-60)*1000,uid:j.user.id};lsSet(SK,JSON.stringify(sess));return sess;
+}
+async function token(){
+  if(!sess)throw {code:'unauthenticated'};
+  if(Date.now()>sess.exp){try{await auth('refresh_token',{refresh_token:sess.rt})}catch(e){sess=null;lsSet(SK,null);location.reload();throw {code:'unauthenticated'}}}
+  return sess.at;
+}
+async function rest(path,opt={}){
+  const t=await token();
+  const r=await fetch(URL_+'/rest/v1/'+path,{method:opt.method||'GET',headers:{apikey:PUB,Authorization:'Bearer '+t,'Content-Type':'application/json',...(opt.headers||{})},body:opt.body?JSON.stringify(opt.body):undefined});
+  if(!r.ok){const tx=await r.text();throw {code:r.status===401||r.status===403?'permission_denied':'bad_request',message:tx.slice(0,200)}}
+  return r;
+}
+function loginUI(){
+  return new Promise(res=>{
+    const d=document.createElement('div');
+    d.style.cssText='position:fixed;inset:0;z-index:99999;background:#f4f6f4;display:flex;align-items:center;justify-content:center;font:15px -apple-system,BlinkMacSystemFont,sans-serif';
+    d.innerHTML='<form style="background:#fff;padding:28px;border-radius:14px;box-shadow:0 4px 24px #0002;width:300px;display:grid;gap:12px"><b style="font-size:20px">CRM ФМРус</b><input id="lg_e" placeholder="Логин" autocomplete="username" style="padding:11px;font-size:16px;border:1px solid #bbb;border-radius:8px"><input id="lg_p" type="password" placeholder="Пароль" autocomplete="current-password" style="padding:11px;font-size:16px;border:1px solid #bbb;border-radius:8px"><button style="padding:12px;font-size:16px;border:0;border-radius:8px;background:#2f7d3b;color:#fff">Войти</button><div id="lg_m" style="color:#b00;min-height:18px"></div></form>';
+    document.body.appendChild(d);
+    d.querySelector('form').onsubmit=async ev=>{ev.preventDefault();const m=d.querySelector('#lg_m');m.textContent='';
+      let e=d.querySelector('#lg_e').value.trim().toLowerCase();if(e&&!e.includes('@'))e+='@crm.fmrus.kz';
+      try{await auth('password',{email:e,password:d.querySelector('#lg_p').value});d.remove();res()}catch(x){m.textContent=/invalid/i.test(x.message)?'Неверный логин или пароль':x.message}};
+  });
+}
+async function ensureLogin(){
+  if(loginP)return loginP;
+  loginP=(async()=>{
+    try{const s=JSON.parse(lsGet(SK)||'null');if(s){sess=s;await token()}}catch(e){sess=null}
+    if(!sess){if(document.body)await loginUI();else await new Promise(r=>addEventListener('DOMContentLoaded',r)).then(loginUI)}
+    const r=await rest('profiles?user_id=eq.'+sess.uid+'&select=old_uid,name,is_admin');const a=await r.json();
+    if(!a.length)throw new Error('Нет профиля');prof=a[0];
+    if(!prof.is_admin){document.body.innerHTML='<div style="max-width:420px;margin:80px auto;font:16px -apple-system,sans-serif;text-align:center"><b>Нет доступа</b><p>Путевые листы пока доступны только руководству.</p><p><a href="./">Вернуться в CRM</a></p></div>';throw new Error('no access')}
+  })();
+  return loginP;
+}
+const rnd=()=>'n'+Math.random().toString(36).slice(2,10);
+const enc=encodeURIComponent;
+async function fetchColl(path,flt){
+  const out=[];let from=0;
+  for(;;){
+    const r=await rest('docs?coll=eq.'+enc(path)+(flt||'')+'&select=id,data&order=id',{headers:{Range:from+'-'+(from+999)}});
+    const a=await r.json();out.push(...a);if(a.length<1000)break;from+=1000;
+  }
+  return out;
+}
+const listeners=[];
+function mkSnap(path,rows){
+  const docs=rows.map(x=>({id:x.id,exists:true,data:()=>x.data,ref:docRef(path,x.id)}));
+  return {docs,size:docs.length,empty:!docs.length,forEach:f=>docs.forEach(f)};
+}
+function docRef(path,id){
+  id=id||rnd();
+  return {id,path:path+'/'+id,
+    async set(d){await ensureLogin();await rest('docs?on_conflict=coll,id',{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=minimal'},body:{coll:path,id,data:JSON.parse(JSON.stringify(d)),updated_at:new Date().toISOString()}});bump(path)},
+    async delete(){await ensureLogin();await rest('docs?coll=eq.'+enc(path)+'&id=eq.'+enc(id),{method:'DELETE',headers:{Prefer:'return=minimal'}});bump(path)},
+    async get(){await ensureLogin();const r=await rest('docs?coll=eq.'+enc(path)+'&id=eq.'+enc(id)+'&select=data');const a=await r.json();return {id,exists:!!a.length,data:()=>a.length?a[0].data:undefined}},
+    onSnapshot(cb,eb){
+      let stop=false,last='';
+      const run=async()=>{try{const r=await this.get();const s=JSON.stringify(r.data());if(s!==last){last=s;if(!stop)cb(r)}}catch(e){if(eb&&!stop)eb(e)}};
+      const l={path,id,run};listeners.push(l);ensureLogin().then(run);return ()=>{stop=true;const i=listeners.indexOf(l);if(i>=0)listeners.splice(i,1)};
+    }};
+}
+function collRef(path){return {
+  doc:id=>docRef(path,id),
+  async get(){await ensureLogin();return mkSnap(path,await fetchColl(path))},
+  where(f,op,v){const o={'>=':'gte','==':'eq','>':'gt','<':'lt','<=':'lte'}[op]||'eq';
+    return {async get(){await ensureLogin();return mkSnap(path,await fetchColl(path,'&data->>'+f+'='+o+'.'+enc(v)))}}},
+  onSnapshot(cb,eb){
+    let stop=false,sig=null;
+    const run=async(force)=>{
+      try{
+        const r=await rest('docs?coll=eq.'+enc(path)+'&select=updated_at&order=updated_at.desc&limit=1',{headers:{Prefer:'count=exact'}});
+        const a=await r.json();const s=(r.headers.get('content-range')||'')+'|'+(a[0]?a[0].updated_at:'');
+        if(!force&&s===sig)return;sig=s;
+        const rows=await fetchColl(path);if(!stop)cb(mkSnap(path,rows));
+      }catch(e){if(eb&&!stop)eb(e)}
+    };
+    const l={path,run:()=>run(false),force:()=>run(true)};listeners.push(l);ensureLogin().then(()=>run(true));
+    return ()=>{stop=true;const i=listeners.indexOf(l);if(i>=0)listeners.splice(i,1)};
+  }
+}}
+function bump(path){setTimeout(()=>listeners.filter(l=>l.path===path).forEach(l=>(l.force||l.run)()),50)}
+setInterval(()=>{if(document.hidden||!sess)return;listeners.forEach(l=>l.run())},20000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&sess)listeners.forEach(l=>l.run())});
+const db={collection:p=>collRef('wb/'+p),doc:p=>{const i=p.lastIndexOf('/');return docRef('wb/'+p.slice(0,i),p.slice(i+1))}};
+const user={async id(){await ensureLogin();return prof.old_uid},async isOwner(){await ensureLogin();return !!prof.is_admin},
+  async profiles(ids){await ensureLogin();const r=await rest('profiles?select=old_uid,name');const a=await r.json();const m={};a.forEach(x=>m[x.old_uid]=x.name);return Object.fromEntries(ids.map(i=>[i,{id:i,name:m[i]||''}]))}};
+const downloads={async save({filename,data}){const a=document.createElement('a');a.href=URL.createObjectURL(data);a.download=filename;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},2000)}};
+window.claude={use:async n=>{if(n==='db'){await ensureLogin();return db}if(n==='user'){await ensureLogin();return user}if(n==='downloads')return downloads;return null}};
+window.__sbLogout=()=>{lsSet(SK,null);location.reload()};
+})();
+</script>
+
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Путевой лист ФМРус</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: одна рабочая колонка. Сверху водитель и месяц, затем итоги месяца, карточка машины, поездки и заправки; печатная форма и карточка водителя открываются поверх. Токены взяты из CRM ФМРус. */
+:root{
+  --bg:#f5f4f4; --surface:#ffffff; --surface2:#eeeded; --ink:#262127; --muted:#63666A; --line:#dedddd;
+  --accent:#7C2529; --accent-ink:#ffffff; --accent-soft:#f4e6e7;
+  --good:#2a7d46; --good-soft:#dcefe2; --warn:#a85a00; --warn-soft:#ffeed8; --bad:#b42318; --bad-soft:#f8dedb;
+  --f-body:"Onest",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#171415; --surface:#211d1e; --surface2:#2c2728; --ink:#efeaea; --muted:#a9a3a4; --line:#3a3436;
+    --accent:#d9777c; --accent-ink:#2a0c0e; --accent-soft:#3a1f21;
+    --good:#6fcf8f; --good-soft:#1b3326; --warn:#ffb05c; --warn-soft:#3a2a14; --bad:#f08a80; --bad-soft:#3d1f1c;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#171415; --surface:#211d1e; --surface2:#2c2728; --ink:#efeaea; --muted:#a9a3a4; --line:#3a3436;
+  --accent:#d9777c; --accent-ink:#2a0c0e; --accent-soft:#3a1f21;
+  --good:#6fcf8f; --good-soft:#1b3326; --warn:#ffb05c; --warn-soft:#3a2a14; --bad:#f08a80; --bad-soft:#3d1f1c;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:14px;line-height:1.45}
+.wrap{max-width:1120px;margin:0 auto;padding:16px 16px 56px;display:flex;flex-direction:column;gap:14px}
+h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.01em;text-wrap:balance}
+h2{font-size:15px;margin:0;font-weight:600}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.muted{color:var(--muted)}
+.num{font-variant-numeric:tabular-nums}
+
+.top{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px}
+.brand{display:flex;flex-direction:column;gap:2px;min-width:0}
+.brand small{color:var(--muted)}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.grow{flex:1 1 auto}
+
+.btn{appearance:none;border:1px solid var(--line);background:var(--surface);border-radius:6px;padding:7px 12px;cursor:pointer;font-weight:500;white-space:nowrap}
+.btn:hover{background:var(--surface2)}
+.btn[disabled]{opacity:.5;cursor:default}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.pri:hover{filter:brightness(1.08)}
+.btn.sm{padding:4px 9px;font-size:13px}
+.btn.danger{color:var(--bad)}
+.btn.danger.arm{background:var(--bad);color:#fff;border-color:var(--bad)}
+input,select{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:7px 9px;width:100%;min-width:0}
+input:disabled,select:disabled{background:var(--surface2);color:var(--muted)}
+input.bad{border-color:var(--bad);background:var(--bad-soft)}
+.top select{width:auto;max-width:100%;font-weight:600}
+
+.bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.month{display:flex;align-items:center;gap:4px;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:3px}
+.month button{appearance:none;border:0;background:none;width:32px;height:32px;border-radius:6px;cursor:pointer;font-size:18px;line-height:1;color:var(--muted)}
+.month button:hover{background:var(--surface2);color:var(--ink)}
+.month strong{min-width:128px;text-align:center;font-weight:600}
+.chip{display:inline-block;font-size:12px;font-weight:600;padding:2px 9px;border-radius:10px;background:var(--surface2);color:var(--muted);white-space:nowrap}
+.chip.good{background:var(--good-soft);color:var(--good)}
+.chip.bad{background:var(--bad-soft);color:var(--bad)}
+.chip.warn{background:var(--warn-soft);color:var(--warn)}
+.chip.acc{background:var(--accent-soft);color:var(--accent)}
+.banner{background:var(--warn-soft);color:var(--warn);border-radius:8px;padding:10px 14px;font-weight:500}
+
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:8px;min-width:0}
+.kpi{padding:12px 14px}
+.kpi .t{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600}
+.kpi .v{font-size:26px;font-weight:600;letter-spacing:-.02em;margin-top:2px;font-variant-numeric:tabular-nums}
+.kpi .v small{font-size:14px;font-weight:500;color:var(--muted);margin-left:4px;letter-spacing:0}
+.kpi .s{color:var(--muted);font-size:12px;min-height:18px}
+.kpi.alert{border-color:var(--warn)}
+.kpi.alert .v{color:var(--warn)}
+
+.issues{border-left:3px solid var(--warn);padding:10px 14px}
+.issues ul{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:5px}
+.issues li{display:flex;gap:8px;align-items:baseline}
+.issues .chip{flex:none}
+
+.car{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(150px,.7fr) minmax(170px,.8fr);gap:14px;padding:14px;align-items:end}
+.carname{font-size:16px;font-weight:600;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.plate{font-size:13px;font-weight:600;letter-spacing:.06em;border:1.5px solid var(--ink);border-radius:4px;padding:1px 7px;background:var(--surface);font-variant-numeric:tabular-nums;white-space:nowrap}
+.carsub{color:var(--muted);margin-top:4px;overflow-wrap:anywhere}
+.fld{display:flex;flex-direction:column;gap:3px;min-width:0}
+.fld>span{font-size:12px;color:var(--muted);font-weight:500}
+.fld>em{font-style:normal;font-size:12px;color:var(--muted);min-height:17px}
+
+.sec-h{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--line)}
+.sec-h .sum{color:var(--muted);font-variant-numeric:tabular-nums}
+.hd,.r{display:grid;gap:8px;align-items:center;padding:8px 14px}
+.trips .hd,.trips .r{grid-template-columns:136px minmax(150px,1.5fr) minmax(130px,1fr) 108px 108px 70px 32px}
+.fills .hd,.fills .r{grid-template-columns:136px 100px minmax(130px,1fr) 32px}
+.hd{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600;border-bottom:1px solid var(--line);align-items:end}
+.hd .ra{text-align:right}
+.r{border-bottom:1px solid var(--line)}
+.r:last-child{border-bottom:0}
+.c{min-width:0}
+.c .l{display:none}
+.c-km{text-align:right;font-weight:600;font-variant-numeric:tabular-nums}
+.c input.num{text-align:right}
+.msg{grid-column:1/-1;font-size:12px;color:var(--bad)}
+.msg.w{color:var(--warn)}
+.x{appearance:none;background:none;border:0;font-size:20px;line-height:1;cursor:pointer;color:var(--muted);padding:4px;border-radius:6px;width:32px;height:32px}
+.x:hover{background:var(--surface2);color:var(--bad)}
+.x.arm{background:var(--bad);color:#fff;font-size:11px;font-weight:700;width:auto;padding:4px 6px;white-space:nowrap}
+.empty{padding:22px 16px;text-align:center;color:var(--muted)}
+.foot{padding:10px 14px;border-top:1px solid var(--line)}
+.note{font-size:12px;color:var(--muted)}
+
+@media (max-width:820px){
+  .car{grid-template-columns:1fr 1fr}
+  .carinfo{grid-column:1/-1}
+  .hd{display:none}
+  .c .l{display:block;font-size:11px;color:var(--muted);margin-bottom:2px}
+  .trips .r{grid-template-columns:1fr 1fr 34px;grid-template-areas:"date date date" "route route route" "purp purp purp" "o1 o2 o2" "km km x";padding-block:12px}
+  .fills .r{grid-template-columns:1fr 1fr 34px;grid-template-areas:"date lit lit" "note note x";padding-block:12px}
+  .c-date{grid-area:date}.c-route{grid-area:route}.c-purp{grid-area:purp}.c-o1{grid-area:o1}.c-o2{grid-area:o2}
+  .c-km{grid-area:km;text-align:left}.c-x{grid-area:x;align-self:end}
+  .c-lit{grid-area:lit}.c-note{grid-area:note}
+  .c input.num{text-align:left}
+  .c-km output{font-size:16px}
+}
+@media (max-width:460px){ .car{grid-template-columns:1fr} .kpi .v{font-size:22px} }
+
+#modal{position:fixed;inset:0;z-index:20;background:rgba(20,12,13,.55);display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:16px}
+.sheet{background:var(--surface);border:1px solid var(--line);border-radius:10px;width:100%;max-width:560px;padding:16px;margin-block:auto}
+.sheet.wide{max-width:900px}
+.sheet-h{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px}
+form.f{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.fld.wide{grid-column:1/-1}
+.actions{grid-column:1/-1;display:flex;gap:8px;justify-content:space-between;margin-top:6px;flex-wrap:wrap}
+@media (max-width:520px){ form.f{grid-template-columns:1fr} }
+.docwrap{overflow-x:auto;border:1px solid var(--line);border-radius:6px;background:#fff}
+#toast{position:fixed;left:50%;transform:translateX(-50%);bottom:16px;background:var(--ink);color:var(--bg);padding:9px 16px;border-radius:8px;z-index:30;max-width:90vw}
+@media (prefers-reduced-motion:no-preference){ .btn,.x{transition:background .12s,border-color .12s} }
+</style>
+<style id="docCss">
+.doc{background:#fff;color:#000;font-family:Arial,"Helvetica Neue",sans-serif;font-size:12px;line-height:1.35;padding:24px 28px;min-width:680px}
+.doc .org{font-weight:700;font-size:13px}
+.doc h2{font-size:16px;margin:14px 0 2px;text-align:center;font-weight:700;color:#000}
+.doc .per{text-align:center;margin-bottom:12px}
+.doc h3{font-size:12px;margin:14px 0 5px;font-weight:700;color:#000;text-transform:none;letter-spacing:0}
+.doc table{border-collapse:collapse;width:100%}
+.doc th,.doc td{border:1px solid #000;padding:4px 6px;text-align:left;vertical-align:top;color:#000;font-size:12px;font-weight:400}
+.doc thead th,.doc .kv th{font-weight:700;background:#efefef}
+.doc .kv th{width:17%}
+.doc .kv td{width:33%}
+.doc td.n,.doc th.n{text-align:right;white-space:nowrap}
+.doc tfoot td{font-weight:700}
+.doc .sign{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:30px}
+.doc .sign div{border-top:1px solid #000;padding-top:3px;font-size:11px}
+.doc .sign b{display:block;font-size:12px;margin-bottom:22px;font-weight:700}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <h1>Путевой лист</h1>
+      <small>ТОО «ФМРус» · пробег и топливо за месяц</small>
+    </div>
+    <div class="row">
+      <a class="btn" href="./" style="text-decoration:none">← CRM</a>
+      <select id="driverSel" aria-label="Водитель"></select>
+      <button type="button" class="btn" id="driverEdit">Карточка водителя</button>
+      <button type="button" class="btn" id="driverAdd">+ Водитель</button>
+    </div>
+  </header>
+
+  <div id="banner" class="banner" hidden></div>
+
+  <div class="bar">
+    <div class="month">
+      <button type="button" id="mPrev" aria-label="Предыдущий месяц">‹</button>
+      <strong id="mLabel"></strong>
+      <button type="button" id="mNext" aria-label="Следующий месяц">›</button>
+    </div>
+    <span id="status" class="chip">Черновик</span>
+    <span id="saveState" class="muted"></span>
+    <span class="grow"></span>
+    <div class="row" id="actions"></div>
+  </div>
+
+  <main id="main" style="display:flex;flex-direction:column;gap:14px">
+    <div class="panel empty" id="loading">Загрузка…</div>
+  </main>
+</div>
+
+<div id="modal" hidden></div>
+<div id="toast" hidden></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+"use strict";
+/* ---------- helpers ---------- */
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const MONTHS = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+const num = v => { if (v == null) return null; const s = String(v).replace(/\s/g,'').replace(',','.'); if (s === '') return null; const n = Number(s); return Number.isFinite(n) ? n : null; };
+const round2 = n => Math.round(n * 100) / 100;
+const fL = n => n == null ? '—' : n.toLocaleString('ru-RU', {maximumFractionDigits: 2});
+const fKm = n => n == null ? '—' : Math.round(n).toLocaleString('ru-RU');
+const uid = () => Math.random().toString(36).slice(2, 10);
+const pad = n => String(n).padStart(2, '0');
+const todayStr = () => { const d = new Date(); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); };
+const shiftMonth = (m, k) => { let [y, mo] = m.split('-').map(Number); mo += k; while (mo < 1) { mo += 12; y--; } while (mo > 12) { mo -= 12; y++; } return y + '-' + pad(mo); };
+const bounds = m => { const [y, mo] = m.split('-').map(Number); return [m + '-01', m + '-' + pad(new Date(y, mo, 0).getDate())]; };
+const monthLabel = m => { const [y, mo] = m.split('-').map(Number); return MONTHS[mo - 1] + ' ' + y; };
+const dmy = s => s ? s.slice(8, 10) + '.' + s.slice(5, 7) + '.' + s.slice(0, 4) : '';
+const plural = (n, a, b, c) => { const k = Math.abs(n) % 100, j = k % 10; return (k > 10 && k < 20) ? c : j === 1 ? a : (j >= 2 && j <= 4) ? b : c; };
+const KIND = {company: 'служебный', personal: 'личный'};
+function toast(text) { const t = $('#toast'); t.textContent = text; t.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => t.hidden = true, 3200); }
+function banner(text) { const b = $('#banner'); b.textContent = text || ''; b.hidden = !text; }
+
+/* ---------- расчёт (чистые функции) ---------- */
+const cmpDate = (a, b) => (a.date || '9999').localeCompare(b.date || '9999') || ((a.odoStart ?? 1e12) - (b.odoStart ?? 1e12));
+function calc(sh) {
+  let km = 0, fueled = 0;
+  for (const t of sh.trips) if (t.odoStart != null && t.odoEnd != null && t.odoEnd >= t.odoStart) km += t.odoEnd - t.odoStart;
+  for (const f of sh.fills) if (f.liters != null && f.liters > 0) fueled += f.liters;
+  fueled = round2(fueled);
+  const byNorm = sh.norm != null ? round2(km * sh.norm / 100) : null;
+  const end = (byNorm != null && sh.fuelStart != null) ? round2(sh.fuelStart + fueled - byNorm) : null;
+  const per100 = km > 0 ? round2(fueled / km * 100) : null;
+  return {km, fueled, byNorm, end, per100};
+}
+function analyse(sh, driver) {
+  const [a, b] = bounds(sh.month), rows = {}, list = [];
+  let missing = 0, errors = 0, prevEnd = null;
+  for (const t of [...sh.trips].sort(cmpDate)) {
+    const r = rows[t.id] = {errs: [], warns: [], bad: new Set(), miss: new Set(), km: null};
+    if (!t.date) r.miss.add('date'); else if (t.date < a || t.date > b) { r.bad.add('date'); r.errs.push('Дата не из этого месяца'); }
+    if (!String(t.route || '').trim()) r.miss.add('route');
+    if (t.odoStart == null) r.miss.add('odoStart');
+    if (t.odoEnd == null) r.miss.add('odoEnd');
+    if (t.odoStart != null && t.odoEnd != null) {
+      if (t.odoEnd < t.odoStart) { r.bad.add('odoEnd'); r.errs.push('Одометр при возвращении меньше, чем при выезде'); }
+      else { r.km = t.odoEnd - t.odoStart; if (r.km > 1500) r.warns.push('Пробег за поездку больше 1 500 км, проверьте одометр'); }
+    }
+    if (t.odoStart != null && prevEnd != null && t.odoStart < prevEnd) { r.bad.add('odoStart'); r.errs.push('Одометр при выезде меньше, чем в конце предыдущей поездки (' + fKm(prevEnd) + ')'); }
+    if (t.odoEnd != null && (t.odoStart == null || t.odoEnd >= t.odoStart)) prevEnd = Math.max(prevEnd ?? 0, t.odoEnd);
+    if (r.miss.size) missing++;
+    errors += r.errs.length;
+  }
+  for (const f of sh.fills) {
+    const r = rows[f.id] = {errs: [], warns: [], bad: new Set(), miss: new Set()};
+    if (!f.date) r.miss.add('date'); else if (f.date < a || f.date > b) { r.bad.add('date'); r.errs.push('Дата не из этого месяца'); }
+    if (f.liters == null) r.miss.add('liters');
+    else if (f.liters <= 0) { r.bad.add('liters'); r.errs.push('Литры должны быть больше нуля'); }
+    else if (driver && driver.tank != null && f.liters > driver.tank) r.warns.push('Больше объёма бака (' + fL(driver.tank) + ' л)');
+    if (r.miss.size) missing++;
+    errors += r.errs.length;
+  }
+  const c = calc(sh);
+  if (errors) list.push({k: 'bad', t: 'Ошибка', m: 'В строках есть ошибки: ' + errors + '. Они отмечены красным.'});
+  if (sh.norm == null) list.push({k: 'warn', t: 'Норма', m: 'Норма расхода не задана, поэтому расход и остаток на конец месяца не считаются.'});
+  if (sh.fuelStart == null) list.push({k: 'warn', t: 'Остаток', m: 'Не указан остаток топлива на начало месяца.'});
+  if (c.end != null && c.end < 0) list.push({k: 'warn', t: 'Топливо', m: 'По норме израсходовано больше, чем было топлива (' + fL(c.end) + ' л). Проверьте заправки, одометр или норму.'});
+  if (c.end != null && driver && driver.tank != null && c.end > driver.tank) list.push({k: 'warn', t: 'Топливо', m: 'Расчётный остаток ' + fL(c.end) + ' л больше объёма бака (' + fL(driver.tank) + ' л): заправлено больше, чем израсходовано по норме.'});
+  return {rows, list, missing, errors, c};
+}
+
+/* ---------- состояние ---------- */
+const S = {db: null, dl: null, drivers: [], driversLoaded: false, driverId: null, month: todayStr().slice(0, 7),
+  sheet: null, exists: false, sheetLoaded: false, carried: false, token: 0, unsub: null,
+  dirty: false, saving: 0, saveErr: '', showMissing: false, mem: {}};
+let saveTimer = null, saveChain = Promise.resolve(), loadTimer = null;
+const driver = () => S.drivers.find(d => d.id === S.driverId) || null;
+const sheetKey = () => S.driverId + '_' + S.month;
+const locked = () => !S.sheet || S.sheet.status !== 'draft';
+
+function normSheet(d, driverId, month) {
+  return {
+    driverId: d.driverId || driverId, month: d.month || month,
+    norm: num(d.norm), fuelStart: num(d.fuelStart),
+    status: ['draft', 'submitted', 'approved'].includes(d.status) ? d.status : 'draft',
+    submittedAt: d.submittedAt || null,
+    trips: (Array.isArray(d.trips) ? d.trips : []).map(t => ({id: String(t.id || uid()), date: t.date || '', route: t.route || '', purpose: t.purpose || '', odoStart: num(t.odoStart), odoEnd: num(t.odoEnd)})),
+    fills: (Array.isArray(d.fills) ? d.fills : []).map(f => ({id: String(f.id || uid()), date: f.date || '', liters: num(f.liters), note: f.note || ''}))
+  };
+}
+
+/* ---------- хранилище ---------- */
+function startDrivers() {
+  if (!S.db) { S.driversLoaded = true; onDrivers(); return; }
+  loadTimer = setTimeout(() => banner('Данные пока не загрузились. Проверьте связь, страница продолжит попытки сама.'), 10000);
+  S.db.collection('drivers').onSnapshot(snap => {
+    clearTimeout(loadTimer); if (!S.saveErr) banner('');
+    S.drivers = snap.docs.map(d => Object.assign({id: d.id}, d.data()));
+    S.driversLoaded = true; onDrivers();
+  }, e => { clearTimeout(loadTimer); S.driversLoaded = true; banner('Не удалось открыть данные: ' + (e && e.code || 'ошибка') + '. Изменения не сохранятся.'); S.db = null; onDrivers(); });
+}
+function onDrivers() {
+  S.drivers.sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'ru'));
+  const sel = $('#driverSel');
+  sel.innerHTML = S.drivers.map(d => '<option value="' + esc(d.id) + '">' + esc(d.name || 'Без имени') + (d.plate ? ' · ' + esc(d.plate) : '') + '</option>').join('') || '<option value="">Водителей пока нет</option>';
+  let want = S.driverId;
+  if (!want || !S.drivers.some(d => d.id === want)) {
+    let last = null; try { last = localStorage.getItem('waybill.driver'); } catch (e) {}
+    const pick = S.drivers.find(d => d.id === last) || S.drivers.find(d => d.demo) || S.drivers[0];
+    want = pick ? pick.id : null;
+  }
+  $('#driverEdit').disabled = !want;
+  if (want !== S.driverId) { S.driverId = want; openSheet(); }
+  else if (S.sheet) {
+    const d = driver();
+    if (d && !S.exists && !S.dirty && S.sheet.norm == null && d.norm != null) S.sheet.norm = num(d.norm);
+    renderCar(); recalc();
+  } else if (!want) renderSheet();
+  if (want) sel.value = want;
+}
+async function openSheet() {
+  await saveNow();
+  if (S.unsub) { try { S.unsub(); } catch (e) {} S.unsub = null; }
+  const token = ++S.token;
+  S.sheet = null; S.sheetLoaded = false; S.exists = false; S.carried = false; S.showMissing = false; S.dirty = false;
+  $('#mLabel').textContent = monthLabel(S.month);
+  renderSheet();
+  if (!S.driverId) return;
+  try { localStorage.setItem('waybill.driver', S.driverId); } catch (e) {}
+  const key = sheetKey(), driverId = S.driverId, month = S.month;
+  if (!S.db) {
+    S.sheetLoaded = true;
+    if (S.mem[key]) { S.sheet = S.mem[key]; S.exists = true; } else { S.sheet = blankSheet(driverId, month); }
+    renderSheet(); return;
+  }
+  S.unsub = S.db.doc('sheets/' + key).onSnapshot(snap => {
+    if (token !== S.token) return;
+    if (!S.sheetLoaded) {
+      S.sheetLoaded = true;
+      if (snap.exists) { S.sheet = normSheet(snap.data(), driverId, month); S.exists = true; }
+      else { S.sheet = blankSheet(driverId, month); prefill(token, driverId, month); }
+      renderSheet(); return;
+    }
+    if (S.dirty || S.saving || (snap.metadata && snap.metadata.hasPendingWrites) || !snap.exists) return;
+    const inc = normSheet(snap.data(), driverId, month);
+    if (JSON.stringify(inc) !== JSON.stringify(S.sheet)) { S.sheet = inc; S.exists = true; renderSheet(); }
+  }, e => { if (token !== S.token) return; S.sheetLoaded = true; S.sheet = blankSheet(driverId, month); renderSheet(); banner('Лист не загрузился: ' + (e && e.code || 'ошибка') + '.'); });
+}
+function blankSheet(driverId, month) {
+  const d = S.drivers.find(x => x.id === driverId);
+  return normSheet({norm: d ? d.norm : null}, driverId, month);
+}
+async function prefill(token, driverId, month) {
+  // Остаток и норма переносятся из листа за прошлый месяц, если он есть.
+  try {
+    const snap = await S.db.doc('sheets/' + driverId + '_' + shiftMonth(month, -1)).get();
+    if (token !== S.token || !snap.exists || S.exists || S.dirty || !S.sheet) return;
+    const prev = normSheet(snap.data(), driverId, shiftMonth(month, -1)), pc = calc(prev);
+    let changed = false;
+    if (S.sheet.norm == null && prev.norm != null) { S.sheet.norm = prev.norm; changed = true; }
+    if (S.sheet.fuelStart == null && pc.end != null) { S.sheet.fuelStart = pc.end; S.carried = true; changed = true; }
+    if (changed) { renderCar(); recalc(); }
+  } catch (e) {}
+}
+function touch() {
+  S.dirty = true; setSaveState();
+  clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 800);
+}
+function saveNow() {
+  clearTimeout(saveTimer);
+  if (!S.dirty || !S.sheet) return saveChain;
+  const key = S.sheet.driverId + '_' + S.sheet.month, body = JSON.parse(JSON.stringify(S.sheet));
+  S.dirty = false;
+  if (!S.db) { S.mem[key] = S.sheet; S.exists = true; setSaveState(); return saveChain; }
+  S.saving++; setSaveState();
+  const ref = S.db.doc('sheets/' + key);
+  saveChain = saveChain.then(() => ref.set(body)).then(() => { S.exists = true; S.saveErr = ''; })
+    .catch(e => { S.saveErr = (e && e.code) || 'ошибка'; S.dirty = true; })
+    .then(() => { S.saving--; setSaveState(); });
+  return saveChain;
+}
+function setSaveState() {
+  const el = $('#saveState');
+  if (!S.driverId || !S.sheet) { el.textContent = ''; return; }
+  if (!S.db) el.textContent = 'Не сохраняется';
+  else if (S.saveErr && S.dirty) el.textContent = S.saveErr === 'invalid_argument' ? 'Не сохранено: нет права на запись' : 'Не сохранено: ' + S.saveErr;
+  else if (S.dirty || S.saving) el.textContent = 'Сохраняется…';
+  else el.textContent = S.exists ? 'Сохранено' : '';
+}
+
+/* ---------- отрисовка ---------- */
+function renderSheet() {
+  const main = $('#main'), d = driver();
+  $('#mLabel').textContent = monthLabel(S.month);
+  if (!S.driversLoaded || (S.driverId && !S.sheet)) { main.innerHTML = '<div class="panel empty">Загрузка…</div>'; renderBar(); return; }
+  if (!d) {
+    main.innerHTML = '<div class="panel empty"><p>Водителей пока нет. Добавьте первого: ФИО, автомобиль, госномер и топливную карту.</p><button type="button" class="btn pri" data-act="addDriver">+ Водитель</button></div>';
+    renderBar(); return;
+  }
+  const lk = locked();
+  main.innerHTML =
+    '<section class="kpis" id="kpis"></section>' +
+    '<section class="panel issues" id="issues" hidden></section>' +
+    '<section class="panel" id="car"></section>' +
+    '<section class="panel trips"><div class="sec-h"><h2>Поездки</h2><span class="sum" id="tripSum"></span></div>' +
+      '<div class="hd"><span>Дата</span><span>Маршрут</span><span>Цель поездки</span><span class="ra">Одометр при выезде</span><span class="ra">Одометр при возвращении</span><span class="ra">Пробег, км</span><span></span></div>' +
+      '<div id="trips"></div>' + (lk ? '' : '<div class="foot"><button type="button" class="btn" data-act="addTrip">+ Поездка</button></div>') + '</section>' +
+    '<section class="panel fills"><div class="sec-h"><h2>Заправки по топливной карте</h2><span class="sum" id="fillSum"></span></div>' +
+      '<div class="hd"><span>Дата</span><span class="ra">Литры</span><span>Примечание</span><span></span></div>' +
+      '<div id="fills"></div>' + (lk ? '' : '<div class="foot"><button type="button" class="btn" data-act="addFill">+ Заправка</button></div>') + '</section>' +
+    '<p class="note">Лист заполняется по ходу месяца: одометр в день поездки, заправка в день заправки. В CRM кнопки «Принять» и «Вернуть» увидит только руководитель, а поездки будут подставляться из журнала выездов.</p>';
+  S.sheet.trips.sort(cmpDate); S.sheet.fills.sort(cmpDate);
+  renderCar(); renderTrips(); renderFills(); recalc();
+}
+function renderBar() {
+  const st = $('#status'), act = $('#actions'), sh = S.sheet;
+  if (!sh || !driver()) { st.hidden = true; act.innerHTML = ''; setSaveState(); return; }
+  st.hidden = false;
+  const map = {draft: ['Черновик', ''], submitted: ['Сдан, ждёт проверки', 'warn'], approved: ['Принят', 'good']};
+  st.textContent = map[sh.status][0]; st.className = 'chip ' + map[sh.status][1];
+  let h = '<button type="button" class="btn" data-act="doc">Печатная форма</button>';
+  if (sh.status === 'draft') h += '<button type="button" class="btn pri" data-act="submit">Сдать лист</button>';
+  else if (sh.status === 'submitted') h += '<button type="button" class="btn" data-act="reopen">Вернуть на доработку</button><button type="button" class="btn pri" data-act="approve">Принять</button>';
+  else h += '<button type="button" class="btn" data-act="reopen">Открыть для правок</button>';
+  act.innerHTML = h; setSaveState();
+}
+function renderCar() {
+  const d = driver(), sh = S.sheet, el = $('#car'); if (!el || !d || !sh) return;
+  const dis = locked() ? ' disabled' : '';
+  const sub = [d.fuel, d.card ? 'топливная карта № ' + d.card : 'топливная карта не указана', d.tank != null ? 'бак ' + fL(num(d.tank)) + ' л' : ''].filter(Boolean).map(esc).join(' · ');
+  el.innerHTML = '<div class="car"><div class="carinfo"><div class="carname">' + esc(d.car || 'Автомобиль не указан') +
+    (d.plate ? ' <span class="plate">' + esc(d.plate) + '</span>' : '') +
+    ' <span class="chip ' + (d.kind === 'company' ? 'acc' : '') + '">' + (KIND[d.kind] || 'личный') + '</span>' + (d.demo ? ' <span class="chip warn">пример</span>' : '') + '</div>' +
+    '<div class="carsub">' + sub + '</div></div>' +
+    '<label class="fld" for="norm"><span>Норма расхода, л/100 км</span><input id="norm" class="num" inputmode="decimal" autocomplete="off" value="' + (sh.norm ?? '') + '" placeholder="внесём позже"' + dis + '><em></em></label>' +
+    '<label class="fld" for="fuelStart"><span>Остаток на начало месяца, л</span><input id="fuelStart" class="num" inputmode="decimal" autocomplete="off" value="' + (sh.fuelStart ?? '') + '"' + dis + '><em>' + (S.carried ? 'перенесён из прошлого месяца' : '') + '</em></label></div>';
+}
+function tripRow(t) {
+  const dis = locked() ? ' disabled' : '', [a, b] = bounds(S.month), id = esc(t.id);
+  return '<div class="r" data-id="' + id + '" data-kind="trips">' +
+    '<label class="c c-date" for="t-' + id + '-date"><span class="l">Дата</span><input type="date" id="t-' + id + '-date" data-f="date" min="' + a + '" max="' + b + '" value="' + esc(t.date) + '"' + dis + '></label>' +
+    '<label class="c c-route" for="t-' + id + '-route"><span class="l">Маршрут</span><input type="text" id="t-' + id + '-route" data-f="route" placeholder="Откуда → куда → обратно" value="' + esc(t.route) + '"' + dis + '></label>' +
+    '<label class="c c-purp" for="t-' + id + '-purp"><span class="l">Цель поездки</span><input type="text" id="t-' + id + '-purp" data-f="purpose" placeholder="Хозяйство, зачем ездил" value="' + esc(t.purpose) + '"' + dis + '></label>' +
+    '<label class="c c-o1" for="t-' + id + '-o1"><span class="l">Одометр при выезде</span><input type="text" class="num" inputmode="numeric" autocomplete="off" id="t-' + id + '-o1" data-f="odoStart" value="' + (t.odoStart ?? '') + '"' + dis + '></label>' +
+    '<label class="c c-o2" for="t-' + id + '-o2"><span class="l">Одометр при возвращении</span><input type="text" class="num" inputmode="numeric" autocomplete="off" id="t-' + id + '-o2" data-f="odoEnd" value="' + (t.odoEnd ?? '') + '"' + dis + '></label>' +
+    '<div class="c c-km"><span class="l">Пробег, км</span><output>—</output></div>' +
+    '<div class="c c-x">' + (dis ? '' : '<button type="button" class="x" data-act="del" aria-label="Удалить поездку">×</button>') + '</div>' +
+    '<div class="msg" hidden></div></div>';
+}
+function fillRow(f) {
+  const dis = locked() ? ' disabled' : '', [a, b] = bounds(S.month), id = esc(f.id);
+  return '<div class="r" data-id="' + id + '" data-kind="fills">' +
+    '<label class="c c-date" for="f-' + id + '-date"><span class="l">Дата</span><input type="date" id="f-' + id + '-date" data-f="date" min="' + a + '" max="' + b + '" value="' + esc(f.date) + '"' + dis + '></label>' +
+    '<label class="c c-lit" for="f-' + id + '-lit"><span class="l">Литры</span><input type="text" class="num" inputmode="decimal" autocomplete="off" id="f-' + id + '-lit" data-f="liters" value="' + (f.liters ?? '') + '"' + dis + '></label>' +
+    '<label class="c c-note" for="f-' + id + '-note"><span class="l">Примечание</span><input type="text" id="f-' + id + '-note" data-f="note" value="' + esc(f.note) + '"' + dis + '></label>' +
+    '<div class="c c-x">' + (dis ? '' : '<button type="button" class="x" data-act="del" aria-label="Удалить заправку">×</button>') + '</div>' +
+    '<div class="msg" hidden></div></div>';
+}
+function renderTrips() { const el = $('#trips'); if (el) el.innerHTML = S.sheet.trips.map(tripRow).join('') || '<div class="empty">Поездок в этом месяце пока нет.</div>'; }
+function renderFills() { const el = $('#fills'); if (el) el.innerHTML = S.sheet.fills.map(fillRow).join('') || '<div class="empty">Заправок в этом месяце пока нет.</div>'; }
+
+function recalc() {
+  const sh = S.sheet, d = driver(); if (!sh || !d || !$('#kpis')) { renderBar(); return; }
+  const A = analyse(sh, d), c = A.c;
+  const nT = sh.trips.length, nF = sh.fills.length;
+  const endAlert = c.end != null && (c.end < 0 || (d.tank != null && c.end > num(d.tank)));
+  $('#kpis').innerHTML =
+    kpi('Пробег за месяц', fKm(c.km), 'км', nT + ' ' + plural(nT, 'поездка', 'поездки', 'поездок')) +
+    kpi('Заправлено', fL(c.fueled), 'л', nF + ' ' + plural(nF, 'заправка', 'заправки', 'заправок')) +
+    kpi('Расход по норме', c.byNorm == null ? '—' : fL(c.byNorm), c.byNorm == null ? '' : 'л', sh.norm == null ? 'норма не задана' : 'норма ' + fL(sh.norm) + ' л/100 км') +
+    kpi('Остаток на конец месяца', c.end == null ? '—' : fL(c.end), c.end == null ? '' : 'л', sh.fuelStart == null ? 'остаток на начало не указан' : 'на начало ' + fL(sh.fuelStart) + ' л', endAlert);
+  $('#tripSum').textContent = nT ? 'Итого ' + fKm(c.km) + ' км' : '';
+  $('#fillSum').textContent = nF ? 'Итого ' + fL(c.fueled) + ' л' : '';
+  document.querySelectorAll('#main .r').forEach(row => {
+    const r = A.rows[row.dataset.id]; if (!r) return;
+    row.querySelectorAll('input[data-f]').forEach(inp => inp.classList.toggle('bad', r.bad.has(inp.dataset.f) || (S.showMissing && r.miss.has(inp.dataset.f))));
+    const out = row.querySelector('output'); if (out) out.textContent = r.km == null ? '—' : fKm(r.km);
+    const msg = row.querySelector('.msg'), txt = r.errs.concat(r.warns).join('. ');
+    msg.textContent = txt; msg.hidden = !txt; msg.classList.toggle('w', !r.errs.length);
+  });
+  const list = A.list.slice();
+  if (S.showMissing && A.missing) list.unshift({k: 'bad', t: 'Не заполнено', m: 'Заполните отмеченные поля: ' + A.missing + ' ' + plural(A.missing, 'строка', 'строки', 'строк') + '.'});
+  const box = $('#issues');
+  box.hidden = !list.length;
+  box.innerHTML = '<ul>' + list.map(i => '<li><span class="chip ' + i.k + '">' + esc(i.t) + '</span><span>' + esc(i.m) + '</span></li>').join('') + '</ul>';
+  renderBar();
+}
+function kpi(t, v, u, s, alert) { return '<div class="panel kpi' + (alert ? ' alert' : '') + '"><div class="t">' + esc(t) + '</div><div class="v">' + esc(v) + (u ? '<small>' + esc(u) + '</small>' : '') + '</div><div class="s">' + esc(s) + '</div></div>'; }
+
+/* ---------- действия ---------- */
+function addTrip() {
+  const sh = S.sheet, d = driver(), [a, b] = bounds(S.month), td = todayStr();
+  const last = [...sh.trips].sort(cmpDate).pop();
+  const t = {id: uid(), date: (td >= a && td <= b) ? td : (last && last.date) || a, route: '', purpose: '',
+    odoStart: (d && d.kind === 'company' && last && last.odoEnd != null) ? last.odoEnd : null, odoEnd: null};
+  sh.trips.push(t); touch();
+  if (sh.trips.length === 1) renderTrips(); else $('#trips').insertAdjacentHTML('beforeend', tripRow(t));
+  recalc(); const f = document.getElementById('t-' + t.id + '-route'); if (f) f.focus();
+}
+function addFill() {
+  const sh = S.sheet, [a, b] = bounds(S.month), td = todayStr();
+  const f = {id: uid(), date: (td >= a && td <= b) ? td : a, liters: null, note: ''};
+  sh.fills.push(f); touch();
+  if (sh.fills.length === 1) renderFills(); else $('#fills').insertAdjacentHTML('beforeend', fillRow(f));
+  recalc(); const el = document.getElementById('f-' + f.id + '-lit'); if (el) el.focus();
+}
+function setStatus(st) {
+  S.sheet.status = st; S.sheet.submittedAt = st === 'submitted' ? new Date().toISOString() : (st === 'draft' ? null : S.sheet.submittedAt);
+  S.showMissing = false; touch(); saveNow(); renderSheet();
+}
+document.addEventListener('input', e => {
+  const inp = e.target;
+  if (inp.id === 'norm' || inp.id === 'fuelStart') {
+    if (!S.sheet || locked()) return;
+    S.sheet[inp.id] = num(inp.value); if (inp.id === 'fuelStart') { S.carried = false; const em = inp.parentElement.querySelector('em'); if (em) em.textContent = ''; }
+    touch(); recalc(); return;
+  }
+  const row = inp.closest && inp.closest('#main .r'); if (!row || !inp.dataset.f || !S.sheet || locked()) return;
+  const item = S.sheet[row.dataset.kind].find(x => x.id === row.dataset.id); if (!item) return;
+  const f = inp.dataset.f;
+  item[f] = (f === 'odoStart' || f === 'odoEnd') ? (num(inp.value) == null ? null : Math.round(num(inp.value))) : f === 'liters' ? num(inp.value) : inp.value;
+  touch(); recalc();
+});
+document.addEventListener('click', e => {
+  const b = e.target.closest && e.target.closest('[data-act]'); if (!b) return;
+  const act = b.dataset.act;
+  if (act === 'addDriver') return driverForm(null);
+  if (act === 'close') return closeModal();
+  if (!S.sheet) return;
+  if (act === 'addTrip') return addTrip();
+  if (act === 'addFill') return addFill();
+  if (act === 'del') {
+    if (!b.classList.contains('arm')) { b.classList.add('arm'); b.textContent = 'Удалить?'; setTimeout(() => { if (b.isConnected) { b.classList.remove('arm'); b.textContent = '×'; } }, 3500); return; }
+    const row = b.closest('.r'), kind = row.dataset.kind;
+    S.sheet[kind] = S.sheet[kind].filter(x => x.id !== row.dataset.id); touch();
+    if (kind === 'trips') renderTrips(); else renderFills(); recalc(); return;
+  }
+  if (act === 'submit') {
+    const A = analyse(S.sheet, driver());
+    if (A.errors || A.missing) { S.showMissing = true; recalc(); toast('Лист не сдан: исправьте отмеченные поля.'); $('#issues').scrollIntoView({block: 'center'}); return; }
+    setStatus('submitted'); toast('Лист сдан на проверку.'); return;
+  }
+  if (act === 'approve') { setStatus('approved'); toast('Лист принят.'); return; }
+  if (act === 'reopen') { setStatus('draft'); toast('Лист открыт для правок.'); return; }
+  if (act === 'doc') return showDoc();
+  if (act === 'xlsx') return saveXlsx();
+  if (act === 'html') return saveHtml();
+});
+$('#driverSel').addEventListener('change', e => { S.driverId = e.target.value || null; $('#driverEdit').disabled = !S.driverId; openSheet(); });
+$('#driverEdit').addEventListener('click', () => { const d = driver(); if (d) driverForm(d); });
+$('#driverAdd').addEventListener('click', () => driverForm(null));
+$('#mPrev').addEventListener('click', () => { S.month = shiftMonth(S.month, -1); openSheet(); });
+$('#mNext').addEventListener('click', () => { S.month = shiftMonth(S.month, 1); openSheet(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#modal').hidden) closeModal(); });
+$('#modal').addEventListener('mousedown', e => { if (e.target.id === 'modal') closeModal(); });
+function closeModal() { $('#modal').hidden = true; $('#modal').innerHTML = ''; }
+
+/* ---------- карточка водителя ---------- */
+function driverForm(d) {
+  const v = d || {kind: 'personal', fuel: 'АИ-92'};
+  const fuels = ['АИ-92', 'АИ-95', 'АИ-98', 'ДТ', 'Газ'];
+  if (v.fuel && !fuels.includes(v.fuel)) fuels.push(v.fuel);
+  $('#modal').innerHTML = '<div class="sheet"><div class="sheet-h"><h2>' + (d ? 'Карточка водителя' : 'Новый водитель') + '</h2><button type="button" class="x" data-act="close" aria-label="Закрыть">×</button></div>' +
+    '<form class="f" id="dform" novalidate>' +
+    '<label class="fld wide" for="d-name"><span>ФИО</span><input id="d-name" required value="' + esc(v.name) + '"></label>' +
+    '<label class="fld" for="d-car"><span>Автомобиль (марка, модель)</span><input id="d-car" value="' + esc(v.car) + '"></label>' +
+    '<label class="fld" for="d-plate"><span>Госномер</span><input id="d-plate" value="' + esc(v.plate) + '"></label>' +
+    '<label class="fld" for="d-kind"><span>Автомобиль</span><select id="d-kind"><option value="company"' + (v.kind === 'company' ? ' selected' : '') + '>служебный</option><option value="personal"' + (v.kind !== 'company' ? ' selected' : '') + '>личный</option></select></label>' +
+    '<label class="fld" for="d-fuel"><span>Топливо</span><select id="d-fuel">' + fuels.map(f => '<option' + (f === v.fuel ? ' selected' : '') + '>' + esc(f) + '</option>').join('') + '</select></label>' +
+    '<label class="fld" for="d-card"><span>Топливная карта №</span><input id="d-card" inputmode="numeric" value="' + esc(v.card) + '"></label>' +
+    '<label class="fld" for="d-tank"><span>Объём бака, л</span><input id="d-tank" class="num" inputmode="decimal" value="' + (v.tank ?? '') + '"></label>' +
+    '<label class="fld wide" for="d-norm"><span>Норма расхода, л/100 км (подставляется в новые листы)</span><input id="d-norm" class="num" inputmode="decimal" value="' + (v.norm ?? '') + '" placeholder="можно внести позже"></label>' +
+    '<div class="actions"><div>' + (d ? '<button type="button" class="btn danger" id="d-del">Удалить водителя</button>' : '') + '</div>' +
+    '<div class="row"><button type="button" class="btn" data-act="close">Отмена</button><button type="submit" class="btn pri">Сохранить</button></div></div></form></div>';
+  $('#modal').hidden = false; $('#d-name').focus();
+  $('#dform').addEventListener('submit', async e => {
+    e.preventDefault();
+    const name = $('#d-name').value.trim(); if (!name) { $('#d-name').classList.add('bad'); $('#d-name').focus(); return; }
+    const body = {name, car: $('#d-car').value.trim(), plate: $('#d-plate').value.trim(), kind: $('#d-kind').value, fuel: $('#d-fuel').value,
+      card: $('#d-card').value.trim(), tank: num($('#d-tank').value), norm: num($('#d-norm').value)};
+    if (d && d.demo) body.demo = true;
+    try {
+      if (S.db) { const ref = d ? S.db.collection('drivers').doc(d.id) : S.db.collection('drivers').doc(); if (!d) S.driverId = ref.id; await ref.set(body); if (!d) openSheet(); }
+      else { if (d) Object.assign(d, body); else { const id = uid(); S.drivers.push(Object.assign({id}, body)); S.driverId = id; } onDrivers(); if (!d) openSheet(); }
+      closeModal(); toast('Карточка сохранена.');
+    } catch (err) { toast('Не сохранено: ' + ((err && err.code) === 'invalid_argument' ? 'нет права на запись' : (err && err.code) || 'ошибка')); }
+  });
+  const del = $('#d-del');
+  if (del) del.addEventListener('click', async () => {
+    if (!del.classList.contains('arm')) { del.classList.add('arm'); del.textContent = 'Точно удалить?'; return; }
+    try {
+      if (S.db) await S.db.collection('drivers').doc(d.id).delete();
+      else { S.drivers = S.drivers.filter(x => x.id !== d.id); }
+      S.driverId = null; closeModal(); if (!S.db) onDrivers(); toast('Водитель удалён. Его листы остались в базе.');
+    } catch (err) { toast('Не удалено: ' + ((err && err.code) || 'ошибка')); }
+  });
+}
+
+/* ---------- печатная форма и выгрузка ---------- */
+function docHtml(sh, d) {
+  const c = calc(sh), trips = [...sh.trips].sort(cmpDate), fills = [...sh.fills].sort(cmpDate);
+  const [y, mo] = sh.month.split('-').map(Number);
+  const car = [d.car, d.plate ? 'гос. № ' + d.plate : '', '(' + (KIND[d.kind] || 'личный') + ')'].filter(Boolean).join(', ').replace(', (', ' (');
+  return '<div class="doc"><div class="org">ТОО «ФМРус»</div><h2>Путевой лист легкового автомобиля</h2>' +
+    '<div class="per">за ' + MONTHS[mo - 1].toLowerCase() + ' ' + y + ' г.</div>' +
+    '<table class="kv"><tr><th>Водитель</th><td>' + esc(d.name) + '</td><th>Автомобиль</th><td>' + esc(car) + '</td></tr>' +
+    '<tr><th>Топливо</th><td>' + esc(d.fuel || '') + '</td><th>Топливная карта</th><td>' + esc(d.card ? '№ ' + d.card : '') + '</td></tr></table>' +
+    '<h3>Поездки</h3><table><thead><tr><th class="n">№</th><th>Дата</th><th>Маршрут</th><th>Цель поездки</th><th class="n">Одометр при выезде, км</th><th class="n">Одометр при возвращении, км</th><th class="n">Пробег, км</th></tr></thead><tbody>' +
+    (trips.map((t, i) => '<tr><td class="n">' + (i + 1) + '</td><td>' + dmy(t.date) + '</td><td>' + esc(t.route) + '</td><td>' + esc(t.purpose) + '</td><td class="n">' + (t.odoStart == null ? '' : fKm(t.odoStart)) + '</td><td class="n">' + (t.odoEnd == null ? '' : fKm(t.odoEnd)) + '</td><td class="n">' + ((t.odoStart != null && t.odoEnd != null && t.odoEnd >= t.odoStart) ? fKm(t.odoEnd - t.odoStart) : '') + '</td></tr>').join('') || '<tr><td colspan="7">Поездок не было</td></tr>') +
+    '</tbody><tfoot><tr><td colspan="6">Итого пробег за месяц, км</td><td class="n">' + fKm(c.km) + '</td></tr></tfoot></table>' +
+    '<h3>Заправки по топливной карте</h3><table><thead><tr><th class="n">№</th><th>Дата</th><th>Примечание</th><th class="n">Литры</th></tr></thead><tbody>' +
+    (fills.map((f, i) => '<tr><td class="n">' + (i + 1) + '</td><td>' + dmy(f.date) + '</td><td>' + esc(f.note) + '</td><td class="n">' + (f.liters == null ? '' : fL(f.liters)) + '</td></tr>').join('') || '<tr><td colspan="4">Заправок не было</td></tr>') +
+    '</tbody><tfoot><tr><td colspan="3">Итого заправлено за месяц, л</td><td class="n">' + fL(c.fueled) + '</td></tr></tfoot></table>' +
+    '<h3>Движение топлива за месяц</h3><table><thead><tr><th class="n">Остаток на начало, л</th><th class="n">Заправлено, л</th><th class="n">Пробег, км</th><th class="n">Норма, л/100 км</th><th class="n">Расход по норме, л</th><th class="n">Остаток на конец, л</th></tr></thead>' +
+    '<tbody><tr><td class="n">' + (sh.fuelStart == null ? '' : fL(sh.fuelStart)) + '</td><td class="n">' + fL(c.fueled) + '</td><td class="n">' + fKm(c.km) + '</td><td class="n">' + (sh.norm == null ? '' : fL(sh.norm)) + '</td><td class="n">' + (c.byNorm == null ? '' : fL(c.byNorm)) + '</td><td class="n">' + (c.end == null ? '' : fL(c.end)) + '</td></tr></tbody></table>' +
+    '<div class="sign"><div><b>Водитель</b>подпись / ' + esc(d.name) + '</div><div><b>Руководитель</b>подпись / ФИО</div><div><b>Бухгалтер</b>подпись / ФИО</div></div></div>';
+}
+function fileBase() { const d = driver(); return 'Путевой лист ' + String(d.name || '').split(/\s+/)[0] + ' ' + S.sheet.month; }
+function showDoc() {
+  const d = driver(), sh = S.sheet, canX = S.dl && typeof XLSX !== 'undefined';
+  $('#modal').innerHTML = '<div class="sheet wide"><div class="sheet-h"><h2>Печатная форма для бухгалтерии</h2><button type="button" class="x" data-act="close" aria-label="Закрыть">×</button></div>' +
+    '<div class="row" style="margin-bottom:12px">' + (S.dl ? (canX ? '<button type="button" class="btn pri" data-act="xlsx">Скачать Excel</button>' : '') + '<button type="button" class="btn" data-act="html">Скачать для печати</button><span class="note">Файл для печати откройте в браузере и нажмите Ctrl+P.</span>' : '<span class="note">Скачивание в этом окне недоступно.</span>') + '</div>' +
+    (sh.status !== 'approved' ? '<p class="note" style="margin:0 0 10px">Лист ещё не принят руководителем.</p>' : '') +
+    '<div class="docwrap">' + docHtml(sh, d) + '</div></div>';
+  $('#modal').hidden = false;
+}
+async function offer(filename, data) {
+  try { await S.dl.save({filename, data}); toast('Файл сохранён.'); }
+  catch (e) { const c = e && e.code; if (c !== 'declined') toast(c === 'rate_limited' ? 'Подождите немного и повторите.' : 'Скачать не получилось: ' + (c || 'ошибка')); }
+}
+function saveHtml() {
+  const html = '<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"><title>' + esc(fileBase()) + '</title><style>body{margin:0;background:#fff}' + $('#docCss').textContent + '@page{size:A4 landscape;margin:12mm}@media print{.doc{padding:0}}</style></head><body>' + docHtml(S.sheet, driver()) + '</body></html>';
+  offer(fileBase() + '.html', html);
+}
+function buildXlsx(sh, d) {
+  const trips = [...sh.trips].sort(cmpDate), fills = [...sh.fills].sort(cmpDate), c = calc(sh);
+  const [y, mo] = sh.month.split('-').map(Number), R = [], F = (f, v) => ({t: 'n', f, v: v ?? 0});
+  R.push(['ТОО «ФМРус»']);
+  R.push(['Путевой лист легкового автомобиля за ' + MONTHS[mo - 1].toLowerCase() + ' ' + y + ' г.']);
+  R.push([]);
+  R.push(['Водитель', d.name || '']);
+  R.push(['Автомобиль', [d.car, d.plate].filter(Boolean).join(', ')]);
+  R.push(['Принадлежность', KIND[d.kind] || 'личный']);
+  R.push(['Топливо', d.fuel || '']);
+  R.push(['Топливная карта', d.card || '']);
+  R.push([]);
+  R.push(['Поездки']);
+  R.push(['№', 'Дата', 'Маршрут', 'Цель поездки', 'Одометр при выезде, км', 'Одометр при возвращении, км', 'Пробег, км']);
+  const t0 = R.length + 1;
+  trips.forEach((t, i) => { const r = R.length + 1, ok = t.odoStart != null && t.odoEnd != null; R.push([i + 1, dmy(t.date), t.route, t.purpose, t.odoStart, t.odoEnd, ok ? F('F' + r + '-E' + r, t.odoEnd - t.odoStart) : null]); });
+  const kmRow = R.length + 1;
+  R.push(['Итого пробег, км', null, null, null, null, null, trips.length ? F('SUM(G' + t0 + ':G' + (kmRow - 1) + ')', c.km) : 0]);
+  R.push([]);
+  R.push(['Заправки по топливной карте']);
+  R.push(['№', 'Дата', 'Примечание', 'Литры']);
+  const f0 = R.length + 1;
+  fills.forEach((f, i) => R.push([i + 1, dmy(f.date), f.note, f.liters]));
+  const fuRow = R.length + 1;
+  R.push(['Итого заправлено, л', null, null, fills.length ? F('SUM(D' + f0 + ':D' + (fuRow - 1) + ')', c.fueled) : 0]);
+  R.push([]);
+  R.push(['Движение топлива за месяц']);
+  const b = R.length + 1;
+  R.push(['Остаток на начало месяца, л', sh.fuelStart]);
+  R.push(['Заправлено за месяц, л', F('D' + fuRow, c.fueled)]);
+  R.push(['Пробег за месяц, км', F('G' + kmRow, c.km)]);
+  R.push(['Норма расхода, л/100 км', sh.norm]);
+  R.push(['Расход по норме, л', sh.norm == null ? null : F('ROUND(B' + (b + 2) + '*B' + (b + 3) + '/100,2)', c.byNorm)]);
+  R.push(['Остаток на конец месяца, л', (sh.norm == null || sh.fuelStart == null) ? null : F('B' + b + '+B' + (b + 1) + '-B' + (b + 4), c.end)]);
+  R.push([]); R.push([]);
+  R.push(['Водитель', '________________', d.name || '']);
+  R.push(['Руководитель', '________________']);
+  R.push(['Бухгалтер', '________________']);
+  const ws = XLSX.utils.aoa_to_sheet(R);
+  ws['!cols'] = [{wch: 28}, {wch: 18}, {wch: 38}, {wch: 34}, {wch: 22}, {wch: 26}, {wch: 12}];
+  ws['!merges'] = [{s: {r: 0, c: 0}, e: {r: 0, c: 6}}, {s: {r: 1, c: 0}, e: {r: 1, c: 6}}];
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Путевой лист');
+  return XLSX.write(wb, {bookType: 'xlsx', type: 'array'});
+}
+function saveXlsx() {
+  try { offer(fileBase() + '.xlsx', new Blob([buildXlsx(S.sheet, driver())])); }
+  catch (e) { toast('Не удалось собрать Excel.'); }
+}
+
+/* ---------- запуск ---------- */
+(async function init() {
+  $('#mLabel').textContent = monthLabel(S.month);
+  let db = null, dl = null;
+  try { if (window.claude && window.claude.use) [db, dl] = await Promise.all([window.claude.use('db'), window.claude.use('downloads')]); } catch (e) {}
+  S.db = db; S.dl = dl;
+  if (!db) banner('Нет связи с базой: изменения не сохранятся.');
+  startDrivers();
+})();
+</script>
+</body>
+</html>
