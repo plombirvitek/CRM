@@ -36,7 +36,7 @@ async function ensureLogin(){
     try{const s=JSON.parse(lsGet(SK)||'null');if(s){sess=s;await token()}}catch(e){sess=null}
     if(!sess){if(document.body)await loginUI();else await new Promise(r=>addEventListener('DOMContentLoaded',r)).then(loginUI)}
     const r=await rest('profiles?user_id=eq.'+sess.uid+'&select=old_uid,name,is_admin');const a=await r.json();
-    if(!a.length)throw new Error('Нет профиля');prof=a[0];
+    if(!a.length)throw new Error('Нет профиля');prof=a[0];try{const g=await rest('grants?old_uid=eq.'+encodeURIComponent(prof.old_uid)+'&select=prefix');window.__GR=(await g.json()).map(x=>x.prefix)}catch(e){window.__GR=[]}
   })();
   return loginP;
 }
@@ -1490,11 +1490,15 @@ function productForm(id){
     onDelete:p?()=>del('products',p.id):null
   });
 }
+/* совместный доступ к районам (таблица grants в Supabase) */
+const grantOk=(u,d)=>!!d&&(window.__GR||[]).includes('mgr/'+u+'/districts/'+d.id+'/');
+const shareU=d=>((d&&d._us)||[]).find(u=>grantOk(u,d))||'';
 function farmForm(id){
   const f=id?byId(FARMS,id):null, d=byId(S.districts,farmsFor);
   if(!d)return;
-  const fu=f?f._u:((d._us||[]).includes(myUid)?myUid:(d._us||[myUid])[0]);
-  if(fu!==myUid&&!isAdm()){toast('Район другого менеджера: только просмотр');return}
+  const gu=shareU(d);
+  const fu=f?f._u:((d._us||[]).includes(myUid)?myUid:(gu||(d._us||[myUid])[0]));
+  if(fu!==myUid&&!isAdm()&&!grantOk(fu,d)){toast('Район другого менеджера: только просмотр');return}
   openForm({
     title:f?f.name:'Новое хозяйство',
     values:f?{...f,lastall:joinSent(f.last,f.status)}:{stage:'none',manager:meDef()},
@@ -3001,7 +3005,7 @@ document.addEventListener('click',async e=>{
   else if(a==='new-product')productForm();
   else if(a==='edit-product')productForm(id);
   else if(a==='new-farm')farmForm();
-  else if(a==='edit-farm'){const f=FARMS.find(x=>x.id===id);if(f&&((f.mirror&&!isOwner)||(f._u!==myUid&&!isAdm())))toast('Хозяйство другого менеджера: только просмотр');else farmForm(id)}
+  else if(a==='edit-farm'){const f=FARMS.find(x=>x.id===id);if(f&&((f.mirror&&!isOwner)||(f._u!==myUid&&!isAdm()&&!grantOk(f._u,byId(S.districts,farmsFor)))))toast('Хозяйство другого менеджера: только просмотр');else farmForm(id)}
   else if(a==='jnew-open'){const m=newClientMap().get(arg);if(m&&m.act){jf.q=m.act.client;jf.st='done';jf.mgr='';jf.type='';jf.lim=200;qsel=qOf(m.act.date);jnOpen=false;render();setTimeout(()=>{const l=$('#jlist');if(l)l.scrollIntoView({behavior:'smooth',block:'start'})},60)}}
   else if(a==='gs-open'){const [di,...nm]=String(arg).split('|');tab='reach';ls('crm_tab','reach');openDistrict(di,nm.join('|'))}
   else if(a==='open-dist'){tab='reach';ls('crm_tab','reach');openDistrict(id)}
