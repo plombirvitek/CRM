@@ -3,7 +3,7 @@
 <script>/* Слой данных: Supabase вместо базы Claude. Тот же интерфейс window.claude.use('db'|'user'|'downloads'|'mcp'). */
 (()=>{
 const URL_='https://teysgklvfzzfdozdtqkd.supabase.co',PUB='sb_publishable_Urb9ajGZ_a-G-uCnXAPLqw_6xNe6_jC';
-const SK='crm_sb_session';let sess=null,prof=null,loginP=null;
+const SK='crm_sb_session';let sess=null,prof=null,loginP=null,refP=null;
 const lsGet=k=>{try{return localStorage.getItem(k)}catch(e){return null}},lsSet=(k,v)=>{try{v==null?localStorage.removeItem(k):localStorage.setItem(k,v)}catch(e){}};
 async function auth(grant,body){
   const r=await fetch(URL_+'/auth/v1/token?grant_type='+grant,{method:'POST',headers:{apikey:PUB,'Content-Type':'application/json'},body:JSON.stringify(body)});
@@ -12,7 +12,7 @@ async function auth(grant,body){
 }
 async function token(){
   if(!sess)throw {code:'unauthenticated'};
-  if(Date.now()>sess.exp){try{await auth('refresh_token',{refresh_token:sess.rt})}catch(e){sess=null;lsSet(SK,null);location.reload();throw {code:'unauthenticated'}}}
+  if(Date.now()>sess.exp){if(!refP)refP=auth('refresh_token',{refresh_token:sess.rt}).finally(()=>{refP=null});try{await refP}catch(e){if(sess&&Date.now()<=sess.exp)return sess.at;if(e instanceof TypeError)throw {code:'unavailable',message:'нет связи'};sess=null;lsSet(SK,null);location.reload();throw {code:'unauthenticated'}}}
   return sess.at;
 }
 async function rest(path,opt={}){

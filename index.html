@@ -1,7 +1,7 @@
 <!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body><script>/* Слой данных: Supabase вместо базы Claude. Тот же интерфейс window.claude.use('db'|'user'|'downloads'|'mcp'). */
 (()=>{
 const URL_='https://teysgklvfzzfdozdtqkd.supabase.co',PUB='sb_publishable_Urb9ajGZ_a-G-uCnXAPLqw_6xNe6_jC';
-const SK='crm_sb_session';let sess=null,prof=null,loginP=null;
+const SK='crm_sb_session';let sess=null,prof=null,loginP=null,refP=null;
 const lsGet=k=>{try{return localStorage.getItem(k)}catch(e){return null}},lsSet=(k,v)=>{try{v==null?localStorage.removeItem(k):localStorage.setItem(k,v)}catch(e){}};
 async function auth(grant,body){
   const r=await fetch(URL_+'/auth/v1/token?grant_type='+grant,{method:'POST',headers:{apikey:PUB,'Content-Type':'application/json'},body:JSON.stringify(body)});
@@ -10,7 +10,7 @@ async function auth(grant,body){
 }
 async function token(){
   if(!sess)throw {code:'unauthenticated'};
-  if(Date.now()>sess.exp){try{await auth('refresh_token',{refresh_token:sess.rt})}catch(e){sess=null;lsSet(SK,null);location.reload();throw {code:'unauthenticated'}}}
+  if(Date.now()>sess.exp){if(!refP)refP=auth('refresh_token',{refresh_token:sess.rt}).finally(()=>{refP=null});try{await refP}catch(e){if(sess&&Date.now()<=sess.exp)return sess.at;if(e instanceof TypeError)throw {code:'unavailable',message:'нет связи'};console.warn('refresh failed',e&&e.message);sess=null;lsSet(SK,null);location.reload();throw {code:'unauthenticated'}}}
   return sess.at;
 }
 async function rest(path,opt={}){
@@ -3085,4 +3085,14 @@ M.addEventListener('mouseup',e=>{if(bdDown&&e.target===M)closeModal(h);bdDown=fa
 renderBell();init();
 </script>
 
-</body></html>
+<script>
+/* автообновление: раз в 2 часа и сразу после выхода новой версии сайта — только когда не открыта форма и ничего не вводится */
+(()=>{const T0=Date.now(),EVERY=2*36e5;let base=null,want=false;
+const busy=()=>{const m=['#modal','#modal2'].some(q=>{const e=document.querySelector(q);return e&&!e.hidden&&e.innerHTML.trim()});
+  const a=document.activeElement;const typing=a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)&&a.id!=='gq';const qa=[...document.querySelectorAll('input[id^="qa_"],textarea[id^="qa_"]')].some(e=>e.type!=='date'&&e.value.trim());return m||typing||qa||!!document.querySelector('#lg_e')};
+const sig=async()=>{try{const r=await fetch(location.pathname+'?v='+Date.now(),{cache:'no-store'});const t=await r.text();let h=0;for(let i=0;i<t.length;i+=7)h=(h*31+t.charCodeAt(i))|0;return t.length+':'+h}catch(e){return null}};
+const tick=async()=>{const s=await sig();if(s){if(base===null)base=s;else if(s!==base)want=true}
+  if(Date.now()-T0>EVERY)want=true;if(want&&!busy())location.reload()};
+setTimeout(tick,60e3);setInterval(tick,10*60e3);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)tick()});})();
+</script></body></html>
