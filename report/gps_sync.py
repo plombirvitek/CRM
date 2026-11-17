@@ -1,12 +1,15 @@
 """Стоянки машин из Salam GPS → таблица docs в Supabase (mgr/<владелец>/gps/<машина>_<дата>).
-python3 gps_sync.py YYYY-MM-DD [YYYY-MM-DD]   (одна дата или период включительно)
+python3 gps_sync.py [YYYY-MM-DD [YYYY-MM-DD]]   (без дат — вчера и сегодня по Астане)
 Переменные окружения: SB_URL, SB_SECRET, GPS_EMAIL, GPS_PASS."""
 import os,sys,json,time,math,re,datetime as dt,urllib.request,urllib.parse,urllib.error
 SB,SK=os.environ['SB_URL'],os.environ['SB_SECRET'];GE,GP=os.environ['GPS_EMAIL'],os.environ['GPS_PASS']
 OWNER='u_hgT9ICEs5lsbeakc9Uzojg';G='https://www.salam-gps.online'
 CARS={'H 5727 01':'Баялин Б.','064 CT 01':'Жукашев'}
 BASES={'Баялин Б.':[(54.719,66.952,3,'home','Казанка'),(54.8971,69.147,0.6,'office','Петропавловск, офис')],'Жукашев':[(53.283,69.40,12,'home','Кокшетау')]}
-d1=dt.date.fromisoformat(sys.argv[1]);d2=dt.date.fromisoformat(sys.argv[2]) if len(sys.argv)>2 else d1
+TODAY=dt.datetime.now(dt.timezone(dt.timedelta(hours=5))).date()
+# без аргументов: вчера и сегодня (по Астане)
+d1=dt.date.fromisoformat(sys.argv[1]) if len(sys.argv)>1 else TODAY-dt.timedelta(days=1)
+d2=dt.date.fromisoformat(sys.argv[2]) if len(sys.argv)>2 else (d1 if len(sys.argv)>1 else TODAY)
 def http(url,data=None,h={},method=None):
     r=urllib.request.Request(url,data=json.dumps(data).encode() if data is not None else None,method=method or ('POST' if data is not None else 'GET'),headers={'Content-Type':'application/json','User-Agent':'fmrus-crm/1.0 (a.savenkov@fmrus.kz)',**h})
     return json.loads(urllib.request.urlopen(r,timeout=90).read() or b'null')
@@ -68,4 +71,4 @@ for dev in devs:
         doc={'coll':f'mgr/{OWNER}/gps','id':car.replace(' ','')+'_'+day.isoformat(),'data':{'mgr':mgr,'car':car,'date':day.isoformat(),'items':items},'updated_at':dt.datetime.now(dt.timezone.utc).isoformat()}
         http(SB+'/rest/v1/docs?on_conflict=coll,id',[doc],h={**SH,'Prefer':'resolution=merge-duplicates,return=minimal'})
         n+=1;print(day,mgr,sum(1 for x in items if x['k']=='trip'),'выездов:',', '.join(f"{x['p']} {x['t']}" for x in items if x['k']=='trip'))
-print('OK, записано дней:',n)
+print('OK, период',d1,'—',d2,', записано дней:',n)
