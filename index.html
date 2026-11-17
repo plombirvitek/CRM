@@ -60,6 +60,7 @@ function docRef(path,id){
   return {id,path:path+'/'+id,
     async set(d){await ensureLogin();await rest('docs?on_conflict=coll,id',{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=minimal'},body:{coll:path,id,data:JSON.parse(JSON.stringify(d)),updated_at:new Date().toISOString()}});bump(path)},
     async delete(){await ensureLogin();await rest('docs?coll=eq.'+enc(path)+'&id=eq.'+enc(id),{method:'DELETE',headers:{Prefer:'return=minimal'}});bump(path)},
+    async update(patch){await ensureLogin();const r=await rest('rpc/doc_merge',{method:'POST',body:{p_coll:path,p_id:id,p_patch:JSON.parse(JSON.stringify(patch))}});const ok=await r.json();if(!ok)throw {code:'not_found'};bump(path)},
     async get(){await ensureLogin();const r=await rest('docs?coll=eq.'+enc(path)+'&id=eq.'+enc(id)+'&select=data');const a=await r.json();return {id,exists:!!a.length,data:()=>a.length?a[0].data:undefined}},
     onSnapshot(cb,eb){
       let stop=false,last='';
@@ -1200,13 +1201,15 @@ function farmCounts(){
   return fCnt;
 }
 /* счётчики охвата живут в карточке района; после смены этапов их нужно пересчитать, иначе проценты не двигаются */
+/* счётчики района пишем частично: не затираем менеджеров и другие поля устаревшей копией из браузера */
+async function mergeAt(u,coll,id,patch){if(!db)return false;try{await db.collection('mgr/'+u+'/'+coll).doc(id).update(patch);return true}catch(e){return false}}
 async function recountDistricts(){
   if(!db||!farmIdx||!farmIdx.length)return 0;
   const m=farmCounts();let n=0;
   for(const u in (store.districts||{}))for(const prev of (store.districts[u]||[])){
     const o=m.get(u+'|'+prev.id);if(!o)continue;
     if((prev.farmCount||0)===o.n&&(prev.contacted||0)===o.cont&&(prev.clients||0)===o.cl)continue;
-    if(await putAt(u,'districts',prev.id,{...prev,farmCount:o.n,contacted:o.cont,clients:o.cl}))n++;
+    if(await mergeAt(u,'districts',prev.id,{farmCount:o.n,contacted:o.cont,clients:o.cl}))n++;
   }
   return n;
 }
@@ -1882,7 +1885,7 @@ function syncDistrictStats(id){
       const fs=FARMS.filter(f=>f._u===u);
       const farmCount=fs.length,contacted=fs.filter(f=>isCov(f.stage)).length,clients=fs.filter(f=>f.stage==='client').length;
       if(prev.farmCount===farmCount&&prev.contacted===contacted&&prev.clients===clients)continue;
-      await putAt(u,'districts',id,{...prev,farmCount,contacted,clients});
+      await mergeAt(u,'districts',id,{farmCount,contacted,clients});
     }
   },1200);
 }
