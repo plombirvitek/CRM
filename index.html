@@ -858,7 +858,7 @@ function fieldHTML(f,v){
 function openForm({title,fields,values={},extra='',onSave,onDelete,host}){
   if(!host){const dk=title+'|'+(values.id||'');if(DR.form&&DR.form.key===dk)values={...values,...DR.form.vals};else{DR.form={key:dk,vals:{},click:LASTACT&&Date.now()-LASTACT.t<1500?LASTACT:null};drSave()}}
   const m=$(host||'#modal');loadFarmIdx();
-  const isF=fields.some(f=>f.t==='farm');if(isF&&!host){PK.f=null;if(values.fid){const ff=(farmIdx||[]).find(x=>x[9]===values.fid);if(ff)PK.f={fid:ff[9],u:ff[7],did:ff[8],name:ff[0],where:farmWhere(ff)}}}
+  const isF=fields.some(f=>f.t==='farm');if(isF&&!host){PK.f=pkInit(values);if(!farmIdx&&values.client)loadFarmIdx().then(()=>{const inp=pkEl('f','client');if(!PK.f&&inp&&inp.value.trim()===String(values.client).trim()){PK.f=pkInit(values);pkMark('f')}})}
   m.innerHTML=`<div class="sheet" role="dialog" aria-modal="true" aria-label="${esc(title)}">
     <div class="sheet-h"><h2>${esc(title)}</h2><button class="x" data-close aria-label="Закрыть">×</button></div>
     <form class="f" id="frm" novalidate>${fields.map(f=>fieldHTML(f,values)).join('')}
@@ -1779,9 +1779,13 @@ function pkShow(p){
 }
 function pkMark(p){const e=pkEl(p,'pick'),inp=pkEl(p,'client');if(!e)return;
   if(PK[p]){e.className='qa-pick ok';e.textContent='✓ '+PK[p].where}
-  else if(inp&&inp.value.trim()){e.className='qa-pick';e.textContent='Не из охвата — выберите хозяйство из списка или создайте новое'}
+  else if(inp&&inp.value.trim()){e.className='qa-pick';const amb=p==='f'&&farmIdx&&findFarm({client:inp.value.trim(),manager:pkMgr(p),contact:((pkEl(p,'contact')||{}).value||'')})==='ambiguous';e.textContent=amb?'В охвате несколько похожих хозяйств — выберите нужное из списка':'Не из охвата — выберите хозяйство из списка или создайте новое'}
   else{e.className='qa-pick';e.textContent=''}}
 function pkSet(p,pick){PK[p]=pick;const inp=pkEl(p,'client');if(inp){inp.value=pick.name;inp.dispatchEvent(new Event('change'))}const L=pkEl(p,'list');if(L)L.hidden=true;pkMark(p)}
+/* при открытии записи — то же хозяйство, что отмечено галочкой в журнале (по fid или по названию и контакту) */
+function pkInit(v){if(!v||!v.client||!farmIdx)return null;let ff=v.fid?farmIdx.find(x=>x[9]===v.fid):null;
+  if(!ff){const r=findFarm(v);if(Array.isArray(r)&&r.length&&typeof r[0]==='string')ff=r;else if(Array.isArray(r)&&r.length===1&&Array.isArray(r[0]))ff=r[0]}
+  return ff?{fid:ff[9],u:ff[7],did:ff[8],name:String(v.client).trim()===ff[0]?ff[0]:String(v.client).trim(),where:farmWhere(ff)}:null}
 function pkChoose(p,f){pkSet(p,{fid:f[9],u:f[7],did:f[8],name:f[0],where:farmWhere(f)})}
 const pkFields=(p,name)=>{const n=((pkEl(p,'client')||{}).value||name||'').trim();return PK[p]&&PK[p].name===n?{fid:PK[p].fid,fu:PK[p].u,fdist:PK[p].did}:{}};
 function newFarmForm(name,p){
