@@ -622,7 +622,7 @@ async function purgeDistributor(){
 function teamRegionOf(m){const c={};for(const u in (store.districts||{}))for(const d of store.districts[u])if(!d.mirror&&parseManagers(d.managerRaw||'').includes(m))c[d.region]=(c[d.region]||0)+1;return Object.entries(c).sort((a,b)=>b[1]-a[1]).map(x=>x[0])[0]||''}
 let closeArm=false;
 let imp={busy:false,log:[],pct:0,errs:0};
-const frozen=()=>{const m=byId(S.settings,'mode');return !!(m&&m.frozen)};
+const frozen=()=>true; /* импорт из Google Таблиц отключён навсегда: данные ведутся только в CRM */
 
 function ls(k,v){try{if(v===undefined)return localStorage.getItem(k);localStorage.setItem(k,v)}catch(e){return null}}
 const $=s=>document.querySelector(s);
@@ -1691,7 +1691,7 @@ function vKpi(){
 
 function vReach(){
   const D=S.districts;
-  if(!D.length)return empty('Данных об охвате пока нет. Загрузите их из таблицы «Анализ охвата СЗР» на вкладке «Данные».',`<button class="btn pri" data-tab="data">Открыть «Данные»</button>`);
+  if(!D.length)return empty('Районов пока нет или они ещё загружаются. Обновите страницу через минуту.','');
   if(dist&&byId(D,dist))return vDistrict(byId(D,dist));
   const regs=[...new Set(D.map(d=>d.region))].sort();
   if(reg&&!regs.includes(reg))reg='';
@@ -2639,7 +2639,7 @@ function vData(){
   if(!farmIdx&&db)loadFarmIdx().then(()=>{if(tab==='data')render()});
   const dsc=dupScan(),dn=dsc.blank.length+dsc.dups.length;
   return `<div class="grid cols2">${gramPanel()}${stagePanel()}${dupPanel()}${dn?`<div class="panel" style="grid-column:1/-1"><h3>Дубли в журнале</h3><p style="margin:0 0 10px">Найдено: дублей ${dsc.dups.length} (из них от первой версии загрузки: ${dsc.legacy}), пустых строк (одна дата без клиента и плана) ${dsc.blank.length}. Остаётся запись с более полными данными. Записи, созданные в CRM, не удаляются, если у них есть дубль из таблицы.</p><button class="btn pri" data-act="dup-clean">Удалить ${dn}</button></div>`:''}${bkPanel()}
-    ${frozen()?`<div class="panel"><h3>Загрузка из Google Таблиц</h3><p style="margin:0 0 10px">Импорт закрыт: данные ведутся только в CRM, таблицы больше не читаются.</p>${isOwner?'<button class="btn sm" data-act="imp-open">Открыть импорт снова</button>':''}</div>`:`<div class="panel"><h3>Загрузка из Google Таблиц</h3>
+    ${frozen()?`<div class="panel"><h3>Загрузка из Google Таблиц</h3><p style="margin:0">Импорт отключён: данные ведутся только в CRM, таблицы «CRM менеджеров ФМРус» и «Анализ охвата СЗР» больше не загружаются.</p></div>`:`<div class="panel"><h3>Загрузка из Google Таблиц</h3>
       <p style="margin:0 0 10px">Порядок перехода: 1) «Сверить с таблицами» (проверка без записи), 2) если чего-то не хватает, загрузите, 3) повторите сверку, 4) «Закрыть импорт». После этого данные ведутся только в CRM.</p>
       ${canMcp?'':'<div class="banner">Подключение к Google Таблицам недоступно в этом окне. Откройте страницу в Claude под своим аккаунтом, к которому подключён Google Sheets.</div>'}
       <div class="row" style="margin-bottom:8px"><button class="btn" data-act="imp-check"${imp.busy||!canMcp?' disabled':''}>Сверить с таблицами</button><button class="btn pri" data-act="imp-journal"${imp.busy||!canMcp?' disabled':''}>Журнал менеджеров и агроном</button><button class="btn pri" data-act="imp-reach"${imp.busy||!canMcp?' disabled':''}>Охват по районам</button><button class="btn danger" data-act="imp-close"${imp.busy?' disabled':''}>Закрыть импорт</button></div>
@@ -3028,11 +3028,11 @@ document.addEventListener('click',async e=>{
   else if(a==='notes-clear'){NOTES=[];nUnread=0;saveNotes();renderBell()}
   else if(a==='fsort'){if(ff.sk===arg)ff.sd=-ff.sd;else{ff.sk=arg;ff.sd=1}fillFarms()}
   else if(a==='f-reset'){ff={q:'',stage:'',mgr:'',set:'',risk:'',sk:'',sd:1,lim:300};render()}
-  else if(a==='imp-check')runImport('check');
+  
   else if(a==='imp-close'){const ck=byId(S.settings,'check'),ok=ck&&ck.missing===0;if(!closeArm){closeArm=true;t.textContent=ok?'Точно закрыть?':'Сверка не чистая. Всё равно закрыть?';return}closeArm=false;await put('settings','mode',{frozen:true,at:Date.now()});toast('Импорт закрыт');render()}
-  else if(a==='imp-open'){await put('settings','mode',{frozen:false,at:Date.now()});render()}
-  else if(a==='imp-journal')runImport('journal');
-  else if(a==='imp-reach')runImport('reach');
+  
+  
+  
   else if(a==='kpi-bad'){jf={mgr:arg,type:'',st:'bad',q:'',lim:200};tab='journal';ls('crm_tab','journal');render()}
   else if(a==='pk-new'){newFarmForm(pkEl(arg,'client').value.trim(),arg);pkEl(arg,'list').hidden=true}
   else if(a==='qa-add'){
