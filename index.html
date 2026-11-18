@@ -187,6 +187,7 @@ td.r,th.r{text-align:right}
 .chip.bad{background:var(--bad-soft);color:var(--bad)}
 .chip.warn{background:var(--warn-soft);color:var(--warn)}
 .chip.acc{background:var(--accent-soft);color:var(--accent)}
+.rk-st.good{background:var(--good-soft);color:var(--good)}.rk-st.bad{background:var(--bad-soft);color:var(--bad)}.rk-st.acc{background:var(--accent-soft);color:var(--accent)}select.rk[data-fm]{max-width:170px;font-weight:500}select.rk:disabled{cursor:default;opacity:.8}
 .fmk{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:var(--good);color:var(--surface);font-size:10px;font-weight:700;line-height:1;margin-left:6px;vertical-align:middle;cursor:help}
 .fmk.amb{background:var(--warn)}
 .meter{position:relative;height:10px;background:var(--surface2);border-radius:5px;min-width:90px}
@@ -1496,13 +1497,14 @@ function productForm(id){
 /* совместный доступ к районам (таблица grants в Supabase) */
 const grantOk=(u,d)=>!!d&&(window.__GR||[]).includes('mgr/'+u+'/districts/'+d.id+'/');
 const shareU=d=>((d&&d._us)||[]).find(u=>grantOk(u,d))||'';
-function farmForm(id){
-  const f=id?byId(FARMS,id):null, d=byId(S.districts,farmsFor);
+function farmForm(id,ext){
+  const f=ext?ext.f:(id?byId(FARMS,id):null), d=ext?ext.d:byId(S.districts,farmsFor);
   if(!d)return;
   const gu=shareU(d);
   const fu=f?f._u:((d._us||[]).includes(myUid)?myUid:(gu||(d._us||[myUid])[0]));
   if(fu!==myUid&&!isAdm()&&!grantOk(fu,d)){toast('Район другого менеджера: только просмотр');return}
   openForm({
+    host:ext&&ext.host,
     title:f?f.name:'Новое хозяйство',
     values:f?{...f,lastall:joinSent(f.last,f.status)}:{stage:'none',manager:meDef()},
     fields:[
@@ -1519,8 +1521,8 @@ function farmForm(id){
     ],
     onSave:v=>{v.last=(v.lastall||'').trim();v.status='';delete v.lastall;const prevSt=f?(f.stage||'none'):'none';if(v.stage!==prevSt){v.stageAt=Date.now();v.stagePrev=prevSt}
       v.stageAuto=false;
-      return putAt(fu,'districts/'+d.id+'/farms',f?f.id:db.collection('mgr/'+fu+'/districts/'+d.id+'/farms').doc().id,{...(f?noId(f):{dist:''}),...v,src:'crm'}).then(ok=>{if(ok){idxTouch(fu,d.id);reloadIdx(800)}return ok})},
-    onDelete:f?async()=>{try{await db.collection('mgr/'+fu+'/districts/'+d.id+'/farms').doc(f.id).delete();if(farmIdx){farmIdx=farmIdx.filter(r=>r[9]!==f.id||r[8]!==d.id);idxSave()}idxTouch(fu,d.id);reloadIdx(600)}catch(e){toast('Не удалось удалить')}}:null
+      return putAt(fu,'districts/'+d.id+'/farms',f?f.id:db.collection('mgr/'+fu+'/districts/'+d.id+'/farms').doc().id,{...(f?noId(f):{dist:''}),...v,src:'crm'}).then(ok=>{if(ok){idxTouch(fu,d.id);reloadIdx(800);if(ext&&ext.after)ext.after(v)}return ok})},
+    onDelete:f&&!ext?async()=>{try{await db.collection('mgr/'+fu+'/districts/'+d.id+'/farms').doc(f.id).delete();if(farmIdx){farmIdx=farmIdx.filter(r=>r[9]!==f.id||r[8]!==d.id);idxSave()}idxTouch(fu,d.id);reloadIdx(600)}catch(e){toast('Не удалось удалить')}}:null
   });
 }
 
@@ -1781,7 +1783,7 @@ function pkShow(p){
   L.innerHTML=`<div class="qa-new" data-act="pk-new" data-arg="${p}">+ ${r.length?'Нет в списке — создать':'Не найдено — создать'} «${esc(inp.value.trim())}»</div>`+r.map(f=>`<div class="qa-it" data-p="${p}" data-fid="${esc(f[9])}"><span>${esc(f[0])}</span><small>${esc(farmWhere(f))}</small></div>`).join('');
 }
 function pkMark(p){const e=pkEl(p,'pick'),inp=pkEl(p,'client');if(!e)return;
-  if(PK[p]){e.className='qa-pick ok';e.textContent='✓ '+PK[p].where}
+  if(PK[p]){e.className='qa-pick ok';e.innerHTML='✓ '+esc(PK[p].where)+' · <a href="#" data-act="pk-card" data-arg="'+p+'">открыть карточку хозяйства</a>'}
   else if(inp&&inp.value.trim()){e.className='qa-pick';const amb=p==='f'&&farmIdx&&findFarm({client:inp.value.trim(),manager:pkMgr(p),contact:((pkEl(p,'contact')||{}).value||'')})==='ambiguous';e.textContent=amb?'В охвате несколько похожих хозяйств — выберите нужное из списка':'Не из охвата — выберите хозяйство из списка или создайте новое'}
   else{e.className='qa-pick';e.textContent=''}}
 function pkSet(p,pick){PK[p]=pick;const inp=pkEl(p,'client');if(inp){inp.value=pick.name;inp.dispatchEvent(new Event('change'))}const L=pkEl(p,'list');if(L)L.hidden=true;pkMark(p)}
@@ -1791,6 +1793,15 @@ function pkInit(v){if(!v||!v.client||!farmIdx)return null;let ff=v.fid?farmIdx.f
   return ff?{fid:ff[9],u:ff[7],did:ff[8],name:String(v.client).trim()===ff[0]?ff[0]:String(v.client).trim(),where:farmWhere(ff)}:null}
 function pkChoose(p,f){pkSet(p,{fid:f[9],u:f[7],did:f[8],name:f[0],where:farmWhere(f)})}
 const pkFields=(p,name)=>{const n=((pkEl(p,'client')||{}).value||name||'').trim();return PK[p]&&PK[p].name===n?{fid:PK[p].fid,fu:PK[p].u,fdist:PK[p].did}:{}};
+/* из записи журнала: открыть карточку выбранного хозяйства поверх формы и сразу поправить */
+async function farmCard(p){const k=PK[p];if(!k){toast('Сначала выберите хозяйство из списка');return}
+  const d=byId(S.districts,k.did)||{id:k.did,name:(k.where||'').split(', ').pop(),_us:[k.u]};
+  if(k.u!==myUid&&!isAdm()&&!grantOk(k.u,d)){toast('Хозяйство другого менеджера: только просмотр');return}
+  let sn;try{sn=await db.collection('mgr/'+k.u+'/districts/'+k.did+'/farms').doc(k.fid).get()}catch(e){toast('Не удалось открыть хозяйство');return}
+  if(!sn.exists){toast('Хозяйство не найдено в охвате');return}
+  const f={id:k.fid,...sn.data(),_u:k.u};
+  farmForm(f.id,{f,d,host:'#modal2',after:v=>{if(v.name&&v.name!==k.name){PK[p]={...k,name:v.name};const inp=pkEl(p,'client');if(inp)inp.value=v.name}pkMark(p);toast('Карточка хозяйства сохранена')}});
+}
 function newFarmForm(name,p){
   const ds=S.districts.filter(d=>!d.mirror||isOwner).slice().sort((a,b)=>(a.region||'').localeCompare(b.region||'','ru')||a.name.localeCompare(b.name,'ru'));
   if(!ds.length){toast('Нет доступных районов');return}
@@ -1833,6 +1844,11 @@ function vDistrict(d){
   <div class="grid kpis"><div class="panel kpi"><h3>Хозяйств</h3><div class="v">${fmt(FARMS.length)}</div></div><div class="panel kpi"><h3>Охвачено</h3><div class="v">${pct(FARMS.filter(f=>isCov(f.stage)).length,FARMS.length)}%</div><div class="s">${FARMS.filter(f=>isCov(f.stage)).length} хозяйств</div></div><div class="panel kpi"><h3>Клиенты</h3><div class="v">${FARMS.filter(f=>f.stage==='client').length}</div></div><div class="panel kpi"><h3>Контрактов / реализация</h3><div class="v" style="font-size:18px">${fmt(d.contracts||0)} · ${short(d.sales||0)} ₸</div><div class="s">${esc(d.managerRaw||'')}</div></div></div>
   <div class="spread"><div class="row"><input id="ff-q" type="search" placeholder="Поиск: хозяйство, село, контакт" value="${esc(ff.q)}" style="min-width:240px"><select id="ff-stage" aria-label="Этап"><option value="">Все этапы</option>${Object.entries(FSTAGE).map(([k,v])=>`<option value="${k}"${ff.stage===k?' selected':''}>${v}</option>`).join('')}</select><select id="ff-mgr" aria-label="Менеджер"><option value="">Все менеджеры</option>${mg.map(m=>`<option${ff.mgr===m?' selected':''}>${esc(m)}</option>`).join('')}</select><select id="ff-risk" aria-label="Надёжность"><option value="">Любая надёжность</option>${Object.entries(RISK).map(([k,v])=>`<option value="${k}"${ff.risk===k?' selected':''}>${v.n}</option>`).join('')}<option value="none"${ff.risk==='none'?' selected':''}>Не оценён</option></select><select id="ff-set" aria-label="Населённый пункт"><option value="">Все населённые пункты</option>${vl.map(m=>`<option${ff.set===m?' selected':''}>${esc(m)}</option>`).join('')}</select><button class="btn sm" data-act="f-reset">Сбросить</button></div><span class="muted" id="fcount"></span></div><div class="muted" style="font-size:12.5px;margin:2px 0 8px">${Object.entries(RISK).map(([k,v])=>`<span style="margin-right:14px"><span class="dot ${v.c}"></span><b>${v.n}</b> (${FARMS.filter(f=>f.risk===k).length}): ${v.d}`).join('</span>')}</span></div><div id="flist"></div>`;
 }
+/* правка прямо в строке района: кто может править хозяйство (свой кабинет, руководство, совместный доступ) */
+const fEd=f=>{const d=byId(S.districts,farmsFor);return !!f&&!(f.mirror&&!isOwner)&&(f._u===myUid||isAdm()||grantOk(f._u,d))};
+const stCls=st=>st==='client'?'good':st==='contact'?'acc':st==='refused'?'bad':'';
+const fMgrOpts=cur=>{const l=managers().slice();if(cur&&!l.includes(cur))l.unshift(cur);return [['','—']].concat(l.map(m=>[m,m]))};
+async function fPatch(f,patch){try{await db.collection('mgr/'+f._u+'/districts/'+farmsFor+'/farms').doc(f.id).update(patch);Object.assign(f,patch);idxTouch(f._u,farmsFor);reloadIdx(1500);return true}catch(e){toast('Не удалось сохранить: '+((e&&(e.code||e.message))||'ошибка'));fillFarms();return false}}
 function fillFarms(){
   const el=$('#flist'); if(!el)return;
   if(farmsFor!==dist){el.innerHTML=empty('Загрузка…');return}
@@ -1846,7 +1862,7 @@ function fillFarms(){
   if(!FARMS.length){el.innerHTML=empty('В этом районе пока нет хозяйств.',`<button class="btn pri" data-act="new-farm">+ Хозяйство</button>`);return}
   if(!rows.length){el.innerHTML=empty('Ничего не найдено');return}
   const shown=rows.slice(0,ff.lim);
-  el.innerHTML=`<div class="tbl"><table><thead><tr>${th('settlement','Село')}${th('name','Хозяйство')}${th('risk','Надёжность')}${th('manager','Менеджер')}${th('area','Пашня, га','r')}${th('stage','Этап')}${th('last','Последний контакт')}</tr></thead><tbody>${shown.map(f=>`<tr class="click" data-act="edit-farm" data-id="${f.id}"><td>${esc(f.settlement)}</td><td class="clip"><b>${esc(f.name)}</b><div class="muted" style="font-size:12px">${esc((f.contacts||'').slice(0,110))}</div></td><td><select class="rk ${f.risk?'rk-'+RISK[f.risk].c:''}" data-rk="${f.id}" aria-label="Надёжность">${[['','—'],...Object.entries(RISK).map(([k,v])=>[k,v.n])].map(([k,n])=>`<option value="${k}"${(f.risk||'')===k?' selected':''}>${n}</option>`).join('')}</select></td><td>${esc(f.manager)}</td><td class="r num">${f.area?fmt(f.area):''}</td><td><span class="chip ${f.stage==='client'?'good':f.stage==='contact'?'acc':f.stage==='refused'?'bad':''}">${FSTAGE[f.stage]||''}</span></td><td class="clip muted">${esc((f.last||f.status||'').slice(0,160))}</td></tr>`).join('')}</tbody></table></div>${rows.length>shown.length?`<div style="text-align:center;margin-top:10px"><button class="btn" data-act="more-f">Показать ещё (${rows.length-shown.length})</button></div>`:''}`;
+  el.innerHTML=`<div class="tbl"><table><thead><tr>${th('settlement','Село')}${th('name','Хозяйство')}${th('risk','Надёжность')}${th('manager','Менеджер')}${th('area','Пашня, га','r')}${th('stage','Этап')}${th('last','Последний контакт')}</tr></thead><tbody>${shown.map(f=>`<tr class="click" data-act="edit-farm" data-id="${f.id}"><td>${esc(f.settlement)}</td><td class="clip"><b>${esc(f.name)}</b><div class="muted" style="font-size:12px">${esc((f.contacts||'').slice(0,110))}</div></td><td><select class="rk ${f.risk?'rk-'+RISK[f.risk].c:''}" data-rk="${f.id}" aria-label="Надёжность"${fEd(f)?'':' disabled'}>${[['','—'],...Object.entries(RISK).map(([k,v])=>[k,v.n])].map(([k,n])=>`<option value="${k}"${(f.risk||'')===k?' selected':''}>${n}</option>`).join('')}</select></td><td>${fEd(f)?`<select class="rk" data-fm="${f.id}" aria-label="Менеджер">${fMgrOpts(f.manager).map(([k,n])=>`<option value="${esc(k)}"${(f.manager||'')===k?' selected':''}>${esc(n)}</option>`).join('')}</select>`:esc(f.manager)}</td><td class="r num">${f.area?fmt(f.area):''}</td><td>${fEd(f)?`<select class="rk rk-st ${stCls(f.stage)}" data-fs="${f.id}" aria-label="Этап">${Object.entries(FSTAGE).map(([k,n])=>`<option value="${k}"${(f.stage||'none')===k?' selected':''}>${n}</option>`).join('')}</select>`:`<span class="chip ${stCls(f.stage)}">${FSTAGE[f.stage]||''}</span>`}</td><td class="clip muted">${esc((f.last||f.status||'').slice(0,160))}</td></tr>`).join('')}</tbody></table></div>${rows.length>shown.length?`<div style="text-align:center;margin-top:10px"><button class="btn" data-act="more-f">Показать ещё (${rows.length-shown.length})</button></div>`:''}`;
 }
 let fStore={};
 function rebuildFarms(id,us){
@@ -3034,6 +3050,7 @@ document.addEventListener('click',async e=>{
   
   
   else if(a==='kpi-bad'){jf={mgr:arg,type:'',st:'bad',q:'',lim:200};tab='journal';ls('crm_tab','journal');render()}
+  else if(a==='pk-card'){farmCard(arg)}
   else if(a==='pk-new'){newFarmForm(pkEl(arg,'client').value.trim(),arg);pkEl(arg,'list').hidden=true}
   else if(a==='qa-add'){
     if(t.dataset.busy)return;
@@ -3060,7 +3077,9 @@ document.addEventListener('change',async e=>{
   else if(t.id==='jf-st'){jf.st=t.value;jf.lim=200;fillJournal()}
   else if(t.id==='ff-stage'){ff.stage=t.value;fillFarms()}
   else if(t.id==='ff-mgr'){ff.mgr=t.value;fillFarms()}
-  else if(t.dataset&&t.dataset.rk){const f=FARMS.find(x=>x.id===t.dataset.rk);if(f){t.className='rk '+(t.value?'rk-'+RISK[t.value].c:'');await putAt(f._u,'districts/'+farmsFor+'/farms',f.id,{...noId(f),risk:t.value});idxTouch(f._u,farmsFor);reloadIdx(1500)}}
+  else if(t.dataset&&t.dataset.rk){const f=FARMS.find(x=>x.id===t.dataset.rk);if(f){t.className='rk '+(t.value?'rk-'+RISK[t.value].c:'');await fPatch(f,{risk:t.value})}}
+  else if(t.dataset&&t.dataset.fm){const f=FARMS.find(x=>x.id===t.dataset.fm);if(f&&await fPatch(f,{manager:t.value}))toast('Менеджер: '+(t.value||'не назначен'))}
+  else if(t.dataset&&t.dataset.fs){const f=FARMS.find(x=>x.id===t.dataset.fs);if(f){const prev=f.stage||'none';if(t.value!==prev&&await fPatch(f,{stage:t.value,stageAt:Date.now(),stagePrev:prev,stageAuto:false})){t.className='rk rk-st '+stCls(t.value);toast('Этап: '+FSTAGE[t.value])}}}
   else if(t.id==='ff-risk'){ff.risk=t.value;ff.lim=300;fillFarms()}
   else if(t.id==='ff-set'){ff.set=t.value;ff.lim=300;fillFarms()}
   else if(/^cf-(group|crop|obj|st)$/.test(t.id)){cf[t.id.slice(3)]=t.value;fillCatalog()}
