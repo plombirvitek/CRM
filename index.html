@@ -1506,9 +1506,10 @@ function farmForm(id,ext){
   openForm({
     host:ext&&ext.host,
     title:f?f.name:'Новое хозяйство',
-    values:f?{...f,lastall:joinSent(f.last,f.status)}:{stage:'none',manager:meDef()},
+    values:f?{...f,did:d.id,lastall:joinSent(f.last,f.status)}:{did:d.id,stage:'none',manager:meDef()},
     fields:[
       {k:'name',l:'Хозяйство',req:1,w:1},
+      {k:'did',l:'Область и район',t:'select',w:1,opts:(()=>{const l=editDists();if(!l.some(x=>x.id===d.id))l.unshift(d);return l.map(x=>[x.id,(x.region||'')+' · '+x.name])})()},
       {k:'settlement',l:'Населённый пункт'},
       {k:'manager',l:'Закреплённый менеджер',t:'select',opts:(()=>{const l=managers().slice();const cur=(f&&f.manager)||'';if(cur&&!l.includes(cur))l.unshift(cur);return [['','— не назначен —']].concat(l.map(m=>[m,m]))})()},
       {k:'stage',l:'Этап',t:'select',opts:Object.entries(FSTAGE)},
@@ -1519,8 +1520,10 @@ function farmForm(id,ext){
       {k:'info',l:'Доп. информация',t:'area',w:1},
       {k:'lastall',l:'Последний контакт и статус (когда, с кем, что обсудили)',t:'area',w:1}
     ],
-    onSave:v=>{v.last=(v.lastall||'').trim();v.status='';delete v.lastall;const prevSt=f?(f.stage||'none'):'none';if(v.stage!==prevSt){v.stageAt=Date.now();v.stagePrev=prevSt}
+    onSave:async v=>{v.last=(v.lastall||'').trim();v.status='';delete v.lastall;const prevSt=f?(f.stage||'none'):'none';if(v.stage!==prevSt){v.stageAt=Date.now();v.stagePrev=prevSt}
       v.stageAuto=false;
+      const nd=v.did;delete v.did;
+      if(nd&&nd!==d.id)return moveFarm(f,fu,d,nd,v,ext);
       return putAt(fu,'districts/'+d.id+'/farms',f?f.id:db.collection('mgr/'+fu+'/districts/'+d.id+'/farms').doc().id,{...(f?noId(f):{dist:''}),...v,src:'crm'}).then(ok=>{if(ok){idxTouch(fu,d.id);reloadIdx(800);if(ext&&ext.after)ext.after(v)}return ok})},
     onDelete:f&&!ext?async()=>{try{await db.collection('mgr/'+fu+'/districts/'+d.id+'/farms').doc(f.id).delete();if(farmIdx){farmIdx=farmIdx.filter(r=>r[9]!==f.id||r[8]!==d.id);idxSave()}idxTouch(fu,d.id);reloadIdx(600)}catch(e){toast('Не удалось удалить')}}:null
   });
@@ -1793,6 +1796,24 @@ function pkInit(v){if(!v||!v.client||!farmIdx)return null;let ff=v.fid?farmIdx.f
   return ff?{fid:ff[9],u:ff[7],did:ff[8],name:String(v.client).trim()===ff[0]?ff[0]:String(v.client).trim(),where:farmWhere(ff)}:null}
 function pkChoose(p,f){pkSet(p,{fid:f[9],u:f[7],did:f[8],name:f[0],where:farmWhere(f)})}
 const pkFields=(p,name)=>{const n=((pkEl(p,'client')||{}).value||name||'').trim();return PK[p]&&PK[p].name===n?{fid:PK[p].fid,fu:PK[p].u,fdist:PK[p].did}:{}};
+/* районы, куда пользователь может поместить хозяйство: свои, с совместным доступом, у руководства — все */
+function editDists(){return S.districts.filter(x=>(!x.mirror||isOwner)&&(isAdm()||(x._us||[]).includes(myUid)||!!shareU(x))).slice().sort((a,b)=>(a.region||'').localeCompare(b.region||'','ru')||a.name.localeCompare(b.name,'ru'))}
+/* перенос хозяйства в другой район: тот же id, запись в кабинете нового района, старая удаляется */
+async function moveFarm(f,fu,d,nd,v,ext){
+  const td=byId(S.districts,nd);if(!td){toast('Район не найден');return false}
+  const tu=(td._us||[]).includes(myUid)?myUid:(shareU(td)||(isAdm()?(td._us||[myUid])[0]:''));
+  if(!tu){toast('Нет доступа к району '+td.name);return false}
+  const id=f?f.id:db.collection('mgr/'+tu+'/districts/'+td.id+'/farms').doc().id;
+  const ok=await putAt(tu,'districts/'+td.id+'/farms',id,{...(f?noId(f):{dist:''}),...v,src:'crm'});
+  if(!ok)return false;
+  if(f){try{await db.collection('mgr/'+fu+'/districts/'+d.id+'/farms').doc(f.id).delete()}catch(e){toast('Хозяйство скопировано в '+td.name+', но из старого района не удалено: '+((e&&e.code)||'ошибка'));return true}
+    if(farmIdx){farmIdx=farmIdx.filter(r=>r[9]!==f.id||r[8]!==d.id);idxSave()}idxTouch(fu,d.id)}
+  idxTouch(tu,td.id);reloadIdx(800);
+  for(const p in PK)if(PK[p]&&PK[p].fid===id)PK[p]={...PK[p],u:tu,did:td.id,where:(td.region||'')+', '+td.name};
+  toast('Хозяйство перенесено: '+(td.region||'')+', '+td.name);
+  if(ext&&ext.after)ext.after(v);
+  return true;
+}
 /* из записи журнала: открыть карточку выбранного хозяйства поверх формы и сразу поправить */
 async function farmCard(p){const k=PK[p];if(!k){toast('Сначала выберите хозяйство из списка');return}
   const d=byId(S.districts,k.did)||{id:k.did,name:(k.where||'').split(', ').pop(),_us:[k.u]};
