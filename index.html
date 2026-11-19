@@ -1217,7 +1217,7 @@ async function recountDistricts(){
 /* районы, которые должны попасть в индекс охвата: кабинеты коллег приходят позже первой сборки,
    поэтому индекс пересобирается, когда список районов изменился */
 const jobSig=()=>{const a=[];for(const u in (store.districts||{}))for(const d of (store.districts[u]||[]))if(!d.mirror&&dScope(d,u))a.push(u+'|'+d.id);return a.sort().join(',')};
-const IDX_KEY='crm_fidx5',IDX_TTL=24*36e5;
+const IDX_KEY='crm_fidx6',IDX_TTL=24*36e5;
 function idxTouch(u,did){if(u&&did)idxDirty.add(u+'|'+did)}
 function idxSave(){try{localStorage.setItem(IDX_KEY,JSON.stringify({t:Date.now(),u:myUid,rows:farmIdx}))}catch(e){}}
 function idxLoad(){try{const c=JSON.parse(localStorage.getItem(IDX_KEY)||'null');if(c&&c.u===myUid&&Array.isArray(c.rows)&&Date.now()-c.t<6*36e5)return c.rows}catch(e){}return null}
@@ -1227,9 +1227,7 @@ const fkey=(u,did)=>u+'_'+did;
 async function idxScan(u,d){
   const snap=await db.collection('mgr/'+u+'/districts/'+d.id+'/farms').get();
   const rows=[];snap.docs.forEach(x=>{const r=idxRow(x,u,d);if(r)rows.push(r)});
-  /* чтение могло прийти неполным — не затираем индекс района заведомо короткими данными */
-  const full=!(d.farmCount>0)||rows.length>=d.farmCount*0.9;
-  if(full&&(rows.length||!(d.farmCount>0)))try{await db.collection('fidx').doc(fkey(u,d.id)).set({j:JSON.stringify(rows),at:Date.now(),n:rows.length})}catch(e){}
+  /* fidx в базе пересобирает сама база (триггер docs_fidx_sync) при любой правке хозяйства — браузер его не перезаписывает */
   return rows;
 }
 let idxTry=0;
@@ -1703,7 +1701,7 @@ function vReach(){
   const agg=(a)=>({farms:a.reduce((s,d)=>s+(d.farmCount||0),0),cont:a.reduce((s,d)=>s+(d.contacted||0),0),c:a.reduce((s,d)=>s+(d.contracts||0),0),sales:a.reduce((s,d)=>s+(d.sales||0),0),area:a.reduce((s,d)=>s+(d.area||0),0)});
   const list=D.filter(d=>!reg||d.region===reg).sort((x,y)=>(x.region||'').localeCompare(y.region||'','ru')||x.name.localeCompare(y.name,'ru'));
   if(!farmIdx&&db)loadFarmIdx().then(()=>{if(tab==='reach'&&!dist)fillGS()});
-  return `<div class="panel" style="margin-bottom:12px"><input id="gq" type="search" placeholder="Поиск по всем хозяйствам: название, контакт" value="${esc(gq)}" style="width:100%;max-width:520px"><div id="gres"></div><div class="muted" style="font-size:11px;margin-top:6px">v87 · в индексе охвата: ${farmIdx?farmIdx.length:0} хозяйств</div></div>
+  return `<div class="panel" style="margin-bottom:12px"><input id="gq" type="search" placeholder="Поиск по всем хозяйствам: название, контакт" value="${esc(gq)}" style="width:100%;max-width:520px"><div id="gres"></div><div class="muted" style="font-size:11px;margin-top:6px">v88 · в индексе охвата: ${farmIdx?farmIdx.length:0} хозяйств</div></div>
   <div class="grid kpis">${regs.map(r=>{const g=agg(D.filter(d=>d.region===r));return `<div class="panel kpi card" style="cursor:pointer;${reg===r?'border-color:var(--accent)':''}" data-act="pick-region" data-arg="${esc(r)}"><h3>${esc(r)}</h3><div class="v">${pct(g.cont,g.farms)}%</div><div class="s">${fmt(g.cont)} из ${fmt(g.farms)} хозяйств · ${fmt(g.c)} контрактов · ${short(g.sales)} ₸</div></div>`}).join('')}</div>
   <div class="spread"><span class="muted">${reg?esc(reg)+' · ':''}${list.length} районов. Нажмите на район, чтобы увидеть хозяйства.</span>${reg?'<button class="btn sm" data-act="pick-region" data-arg="">Все области</button>':''}</div>
   <div class="tbl"><table><thead><tr><th>Район</th><th>Менеджеры</th><th class="r">Пашня, га</th><th class="r">Хозяйств</th><th style="min-width:130px">Охвачено</th><th class="r">Контрактов</th><th class="r">Реализация</th></tr></thead><tbody>${list.map(d=>`<tr class="click" data-act="open-dist" data-id="${d.id}"><td><b>${esc(d.name)}</b>${reg?'':`<div class="muted" style="font-size:12px">${esc(d.region)}</div>`}${d.dist?`<div class="muted" style="font-size:12px">${esc(d.dist)} км</div>`:''}</td><td>${esc(d.managerRaw||'')}</td><td class="r num">${d.area?fmt(d.area):''}</td><td class="r num">${d.farmCount?fmt(d.farmCount):''}</td><td>${d.farmCount?`<div style="display:flex;gap:8px;align-items:center"><span class="num" style="width:36px">${pct(d.contacted||0,d.farmCount)}%</span><div class="meter" style="flex:1"><i style="width:${pct(d.contacted||0,d.farmCount)}%"></i></div></div>`:''}</td><td class="r num">${d.contracts?fmt(d.contracts):''}</td><td class="r num">${d.sales?money(d.sales):''}</td></tr>`).join('')}</tbody></table></div>`;
