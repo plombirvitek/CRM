@@ -1779,7 +1779,7 @@ function pkShow(p){
   if(!k){L.hidden=true;return}
   if(!farmIdx){L.hidden=false;L.innerHTML='<div class="qa-it">Загрузка охвата…</div>';loadFarmIdx().then(()=>pkShow(p));return}
   const mr=mgrRegion(pkMgr(p));
-  const r=farmIdx.filter(f=>f[7]&&String(f[0]).toLowerCase().includes(k)).sort((a,b)=>((mr&&b[2]===mr)-(mr&&a[2]===mr))||(a[0]<b[0]?-1:1)).slice(0,30);
+  const sk=new Set(),r=farmIdx.filter(f=>{if(!f[7]||!String(f[0]).toLowerCase().includes(k))return false;const q=f[8]+'|'+f[9];if(sk.has(q))return false;sk.add(q);return true}).sort((a,b)=>((mr&&b[2]===mr)-(mr&&a[2]===mr))||(a[0]<b[0]?-1:1)).slice(0,30);
   L.hidden=false;
   L.innerHTML=`<div class="qa-new" data-act="pk-new" data-arg="${p}">+ ${r.length?'Нет в списке — создать':'Не найдено — создать'} «${esc(inp.value.trim())}»</div>`+r.map(f=>`<div class="qa-it" data-p="${p}" data-fid="${esc(f[9])}"><span>${esc(f[0])}</span><small>${esc(farmWhere(f))}</small></div>`).join('');
 }
