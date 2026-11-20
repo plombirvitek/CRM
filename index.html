@@ -1593,9 +1593,10 @@ function vDash(){
 }
 
 let GPS=null,gpsBusy=false,gpsWk=0;
-function gpsLoad(){if(gpsBusy||GPS||!db||!myUid||!isOwner)return;gpsBusy=true;db.collection('mgr/'+myUid+'/gps').get().then(s=>{GPS=s.docs.map(x=>x.data()||{})}).catch(()=>{GPS=[]}).finally(()=>{gpsBusy=false;if(tab==='dash')render()})}
+const GPS_SRC='u_hgT9ICEs5lsbeakc9Uzojg',GPS_VIEW=[GPS_SRC,'u_myakisheva'],gpsCan=()=>GPS_VIEW.includes(myUid);
+function gpsLoad(){if(gpsBusy||GPS||!db||!myUid||!gpsCan())return;gpsBusy=true;db.collection('mgr/'+GPS_SRC+'/gps').get().then(s=>{GPS=s.docs.map(x=>x.data()||{})}).catch(()=>{GPS=[]}).finally(()=>{gpsBusy=false;if(tab==='dash')render()})}
 function gpsPanel(){
-  if(!isOwner)return '';
+  if(!gpsCan())return '';
   if(!GPS){gpsLoad();return ''}
   if(!GPS.length)return '';
   const DN=['Пн','Вт','Ср','Чт','Пт','Сб','Вс'],MN=['янв','фев','мар','апр','мая','июн','июл','авг','сен','окт','ноя','дек'];
@@ -1610,7 +1611,7 @@ function gpsPanel(){
     const tr=it.filter(i=>i.k==='trip').map(i=>`<div class="chip acc" style="display:block;white-space:normal;margin-bottom:3px;line-height:1.3" title="${esc((i.d||'')+(i.f&&i.f.length?' · в охвате: '+i.f.join(', '):''))}">${esc(i.p)}<br><span style="font-weight:400">${esc(i.t||'')} · ${dur(i.m||0)}</span></div>`).join('');
     const bs=it.filter(i=>i.k!=='trip').map(i=>esc(i.p)).join(', ');
     return tr+(bs?`<div class="muted" style="font-size:12px">${bs}</div>`:'')};
-  return `<div class="panel" style="padding:0;margin-top:14px"><div class="spread" style="padding:14px 14px 8px"><h3 style="margin:0">Где были менеджеры · GPS <span class="muted" style="font-weight:400;font-size:12px">видно только вам</span></h3><div class="row"><button class="btn sm" data-act="gps-wk" data-arg="-1" aria-label="Предыдущая неделя">‹</button><span class="muted">${lab(days[0])} – ${lab(days[6])}</span><button class="btn sm" data-act="gps-wk" data-arg="1" aria-label="Следующая неделя"${gpsWk>=0?' disabled':''}>›</button></div></div><div class="tbl" style="border:0"><table style="min-width:900px;table-layout:fixed"><thead><tr><th style="width:120px">Менеджер</th>${days.map((x,i)=>`<th>${DN[i]} ${x.getDate()}</th>`).join('')}</tr></thead><tbody>${mgrs.map(m=>`<tr style="vertical-align:top"><td><b>${esc(m)}</b></td>${days.map(x=>`<td>${cell(by.get(m+'|'+ds(x)))}</td>`).join('')}</tr>`).join('')}</tbody></table></div></div>`;
+  return `<div class="panel" style="padding:0;margin-top:14px"><div class="spread" style="padding:14px 14px 8px"><h3 style="margin:0">Где были менеджеры · GPS <span class="muted" style="font-weight:400;font-size:12px">видно вам и директору</span></h3><div class="row"><button class="btn sm" data-act="gps-wk" data-arg="-1" aria-label="Предыдущая неделя">‹</button><span class="muted">${lab(days[0])} – ${lab(days[6])}</span><button class="btn sm" data-act="gps-wk" data-arg="1" aria-label="Следующая неделя"${gpsWk>=0?' disabled':''}>›</button></div></div><div class="tbl" style="border:0"><table style="min-width:900px;table-layout:fixed"><thead><tr><th style="width:120px">Менеджер</th>${days.map((x,i)=>`<th>${DN[i]} ${x.getDate()}</th>`).join('')}</tr></thead><tbody>${mgrs.map(m=>`<tr style="vertical-align:top"><td><b>${esc(m)}</b></td>${days.map(x=>`<td>${cell(by.get(m+'|'+ds(x)))}</td>`).join('')}</tr>`).join('')}</tbody></table></div></div>`;
 }
 function jstChips(){
   const fm=x=>(!jf.mgr||x.manager===jf.mgr)&&(!jf.type||x.type===jf.type);
