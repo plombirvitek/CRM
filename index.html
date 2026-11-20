@@ -785,7 +785,7 @@ function pPump(){
     ref.get().then(s=>{p.ok=true;if(!cut)p.full=Date.now();p.onSnap(s,true,cut)},e=>{if(!p.ok)p.onErr(e)}).finally(()=>{pRun--;setTimeout(pPump,150)})}
 }
 /* журнал опрашиваем каждые 6 минут, сделки/заявки/агроном — раз в 15, районы/планы — раз в 30 */
-const pollEvery=c=>c==='activities'?36e4:(c==='deals'||c==='quotes'||c==='agro')?9e5:18e5;
+const pollEvery=c=>c==='quotes'?12e4:c==='activities'?36e4:(c==='deals'||c==='agro')?9e5:18e5;
 const pollAll=()=>{if(document.visibilityState!=='visible')return;const now=Date.now();PQ.forEach((p,k)=>{if(now-(p.last||0)>=pollEvery(p.c)-5e3)pollQ(k)})};
 const pollNow=k=>{const p=PQ.get(k);if(p){p.full=0;pollQ(k)}};
 setInterval(pollAll,60000);
@@ -2122,6 +2122,12 @@ function qList(){
   ${L.length?L.map(q=>{const c=qCalc(q);return `<div class="card" data-act="q-edit" data-id="${q.id}" style="margin-bottom:8px"><div class="spread"><div class="nm">№ ${esc(q.num||'')} · ${esc(q.client||'Без контрагента')}</div>${st(q.status)}</div><div class="muted">${esc(dmy(q.date))} · ${esc(q.manager||'')} · <span class="num">${money(c.total)}</span></div></div>`}).join(''):'<div class="empty">Заявок пока нет. Заявка уходит шефу на согласование в PDF, после согласования по ней формируется КП на бланке ТОО.</div>'}</div>`;
   m.hidden=false;
 }
+/* перед открытием чужой заявки берём её свежую версию из базы, чтобы не смотреть и не согласовывать устаревшую */
+async function qEditFresh(id){
+  const ex=id&&byId(S.quotes,id);
+  if(ex&&ex._u&&ex._u!==myUid&&db){try{const r=await db.collection('mgr/'+ex._u+'/quotes').doc(id).get();const d=r.exists&&r.data();if(d){for(const arr of Object.values(store.quotes||{}))(arr||[]).forEach(x=>{if(x.id===id){Object.keys(x).forEach(k=>{if(k!=='id'&&k[0]!=='_')delete x[k]});Object.assign(x,d)}});rebuild('quotes')}}catch(e){}}
+  qEdit(id);
+}
 function qEdit(id){
   const ex=id&&byId(S.quotes,id);
   QW=ex?JSON.parse(JSON.stringify(ex)):{id:'',num:qNum(),date:todayStr(),manager:meDef(),dept:'',client:'',items:[{name:'',qty:'',unit:'л',price:'',date:''}],payMode:'pct',pct:'',first:'',prepayDate:'',finalDate:'',requisites:'',status:'draft',createdAt:Date.now()};
@@ -2261,7 +2267,7 @@ async function qPdf(kind){
 async function qAct(a,id,arg){
   if(a==='q-list')qList();
   else if(a==='q-new')qEdit();
-  else if(a==='q-edit')qEdit(id);
+  else if(a==='q-edit')qEditFresh(id);
   else if(a==='q-back'){QW=null;qList()}
   else if(a==='q-addrow'){qRead();QW.items.push({name:'',qty:'',unit:'л',price:'',date:(QW.items[QW.items.length-1]||{}).date||''});qRows();qUpd()}
   else if(a==='q-delrow'){qRead();QW.items.splice(+arg,1);if(!QW.items.length)QW.items.push({name:'',qty:'',unit:'л',price:'',date:''});qRows();qUpd()}
@@ -3174,7 +3180,7 @@ document.addEventListener('click',async e=>{
   
   else if(a==='kpi-bad'){jf={mgr:arg,type:'',st:'bad',q:'',lim:200};tab='journal';ls('crm_tab','journal');render()}
   else if(a==='pk-card'){farmCard(arg)}
-  else if(a==='qa-open'){qEdit(id)}
+  else if(a==='qa-open'){qEditFresh(id)}
   else if(a==='qa-ok'){qDecide(id,true)}
   else if(a==='qa-no'){const q=byId(S.quotes,id);openForm({title:'Отклонить заявку № '+((q&&q.num)||''),fields:[{k:'note',l:'Причина (увидит менеджер)',t:'textarea',w:1}],values:{},onSave:async v=>{await qDecide(id,false,(v.note||'').trim());return true}})}
   else if(a==='qa-seen'){try{const o=qSeen();o[id+'|'+arg]=1;localStorage.setItem('crm_qseen',JSON.stringify(o))}catch(e){}render()}
