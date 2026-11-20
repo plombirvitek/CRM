@@ -968,6 +968,8 @@ function tokIndex(){
 }
 const mrCache=new Map();
 function fitsFast(a,fr){const m=a.manager||'';let r=mrCache.get(m);if(r===undefined){r=mgrRegions(m);mrCache.set(m,r)}return !r||!fr||r.has(fr)}
+const NOISE_W=new Set(['too','тоо','р-он','рон','район','р-н','рн','с/о','обл','область','скх','кфх','кх','фх','к/х','ф/х']);
+let _dw=null,_dwFor=null;const distWords=()=>{if(_dw&&_dwFor===S.districts)return _dw;_dwFor=S.districts;_dw=new Set();S.districts.forEach(d=>String(d.name||'').toLowerCase().replace(/ё/g,'е').split(/[^а-яa-z0-9]+/).forEach(w=>{if(w.length>3)_dw.add(w)}));return _dw};
 function findFarm0(a){
   if(a.fid){const ff0=farmIdx.find(x=>x[9]===a.fid);if(ff0)return ff0}
   const ps=parentSubs(a);
@@ -986,6 +988,9 @@ function findFarm0(a){
     let sc=(sub&&sup)?100:10;
     if(A.digs.size&&F.digs.size){if(!(A.digs.size===F.digs.size&&subset(A.digs,F.digs)))continue;sc+=50}
     let ov=0;aw.forEach(w=>{if(F.cw.has(w))ov++});
+    /* строже: «Енбек Агро 2020» ≠ «Енбек Агро СК», «Олжа Боровское» ≠ «Агрофирма Боровское» — без общего контактного лица не связываем */
+    if(!ov&&A.digs.size&&!F.digs.size)continue;
+    f._clean=false;if(sup&&!sub){const extra=[...A.core].filter(w=>!F.core.has(w)&&w.length>2&&!NOISE_W.has(w)&&!distWords().has(w));if(!ov&&extra.length)continue;f._clean=!extra.length}
     sc+=20*Math.min(ov,3);
     f._sc=sc;f._sup=sup&&!sub;cands.push(f);
     if(sc>bestScore){best=f;bestScore=sc;tie=false;best._cs=ov}else if(sc===bestScore)tie=true;
@@ -1009,7 +1014,7 @@ function findFarm0(a){
   if(bestScore>=100||best._cs>0)return best;
   /* в области менеджера есть ровно одно похожее по названию хозяйство — считаем, что это оно
      («КХ Хлебороб» → «КХ Фортуна КХ Хлебороб КХ Командир») */
-  if(cands.length===1)return best;
+  if(cands.length===1&&(!best._sup||best._clean))return best;
   return null;
 }
 async function autoMany(a,list){
