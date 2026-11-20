@@ -1,0 +1,25 @@
+name: GPS sync
+
+on:
+  schedule:
+    - cron: "0 4 * * *"
+    - cron: "0 9 * * *"
+    - cron: "0 15 * * *"
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run gps_sync
+        env:
+          SB_URL: ${{ secrets.SB_URL }}
+          SB_SECRET: ${{ secrets.SB_SECRET }}
+          GPS_EMAIL: ${{ secrets.GPS_EMAIL }}
+          GPS_PASS: ${{ secrets.GPS_PASS }}
+        run: python3 report/gps_sync.py
