@@ -827,7 +827,7 @@ async function init(){
   try{db=await window.claude?.use?.('db')}catch(e){db=null}
   try{mcp=await window.claude?.use?.('mcp')}catch(e){mcp=null}
   let user=null;try{user=await window.claude?.use?.('user')}catch(e){}
-  if(user){try{myUid=(await user.id())||'';isOwner=!!(await user.isOwner())}catch(e){}}
+  if(user){try{myUid=(await user.id())||'';MAPB=MAPB_UIDS.includes(myUid);isOwner=!!(await user.isOwner())}catch(e){}}
   {const pl=document.getElementById('planLink');if(pl)pl.hidden=!isOwner;const wl=document.getElementById('wbLink');if(wl)wl.hidden=!isOwner}
   if(isOwner)me=ls('crm_me')||'';
   if(!db||!myUid){ready=true;$('#banner').innerHTML='<div class="banner">Личный кабинет недоступен. Откройте страницу по ссылке из своего аккаунта Claude: иначе данные не сохранятся.</div>';render();return}
@@ -1217,11 +1217,11 @@ async function recountDistricts(){
 /* районы, которые должны попасть в индекс охвата: кабинеты коллег приходят позже первой сборки,
    поэтому индекс пересобирается, когда список районов изменился */
 const jobSig=()=>{const a=[];for(const u in (store.districts||{}))for(const d of (store.districts[u]||[]))if(!d.mirror&&dScope(d,u))a.push(u+'|'+d.id);return a.sort().join(',')};
-const IDX_KEY='crm_fidx6',IDX_TTL=24*36e5;
+const IDX_KEY='crm_fidx7',IDX_TTL=24*36e5;
 function idxTouch(u,did){if(u&&did)idxDirty.add(u+'|'+did)}
 function idxSave(){try{localStorage.setItem(IDX_KEY,JSON.stringify({t:Date.now(),u:myUid,rows:farmIdx}))}catch(e){}}
 function idxLoad(){try{const c=JSON.parse(localStorage.getItem(IDX_KEY)||'null');if(c&&c.u===myUid&&Array.isArray(c.rows)&&Date.now()-c.t<6*36e5)return c.rows}catch(e){}return null}
-const idxRow=(x,u,d)=>{const o=x.data()||{},n=o.name;return n?[n,d.name||'охват',d.region||'',o.risk||'',o.stage||'none',o.stageAt||0,o.stagePrev||'none',u,d.id,x.id,o.contacts||'',o.lastDate||'']:null};
+const idxRow=(x,u,d)=>{const o=x.data()||{},n=o.name;return n?[n,d.name||'охват',d.region||'',o.risk||'',o.stage||'none',o.stageAt||0,o.stagePrev||'none',u,d.id,x.id,o.contacts||'',o.lastDate||'',o.settlement||'',o.manager||'',o.lat==null?null:o.lat,o.lon==null?null:o.lon]:null};
 /* общий индекс охвата: по одному документу на район (fidx/<uid>_<районId>), чтобы не читать все хозяйства при каждом заходе */
 const fkey=(u,did)=>u+'_'+did;
 async function idxScan(u,d){
@@ -1694,6 +1694,7 @@ function vKpi(){
 
 function vReach(){
   const D=S.districts;
+  if(MAPB&&rmap)return vMap();
   if(!D.length)return empty('Районов пока нет или они ещё загружаются. Обновите страницу через минуту.','');
   if(dist&&byId(D,dist))return vDistrict(byId(D,dist));
   const regs=[...new Set(D.map(d=>d.region))].sort();
@@ -1701,7 +1702,7 @@ function vReach(){
   const agg=(a)=>({farms:a.reduce((s,d)=>s+(d.farmCount||0),0),cont:a.reduce((s,d)=>s+(d.contacted||0),0),c:a.reduce((s,d)=>s+(d.contracts||0),0),sales:a.reduce((s,d)=>s+(d.sales||0),0),area:a.reduce((s,d)=>s+(d.area||0),0)});
   const list=D.filter(d=>!reg||d.region===reg).sort((x,y)=>(x.region||'').localeCompare(y.region||'','ru')||x.name.localeCompare(y.name,'ru'));
   if(!farmIdx&&db)loadFarmIdx().then(()=>{if(tab==='reach'&&!dist)fillGS()});
-  return `<div class="panel" style="margin-bottom:12px"><input id="gq" type="search" placeholder="Поиск по всем хозяйствам: название, контакт" value="${esc(gq)}" style="width:100%;max-width:520px"><div id="gres"></div><div class="muted" style="font-size:11px;margin-top:6px">v88 · в индексе охвата: ${farmIdx?farmIdx.length:0} хозяйств</div></div>
+  return `<div class="panel" style="margin-bottom:12px"><input id="gq" type="search" placeholder="Поиск по всем хозяйствам: название, контакт" value="${esc(gq)}" style="width:100%;max-width:520px"><div id="gres"></div>${MAPB?'<div style="margin-top:8px"><button class="btn sm" data-act="reach-map">🗺 Хозяйства на карте <span class="muted">(видно только вам)</span></button></div>':''}<div class="muted" style="font-size:11px;margin-top:6px">v89 · в индексе охвата: ${farmIdx?farmIdx.length:0} хозяйств</div></div>
   <div class="grid kpis">${regs.map(r=>{const g=agg(D.filter(d=>d.region===r));return `<div class="panel kpi card" style="cursor:pointer;${reg===r?'border-color:var(--accent)':''}" data-act="pick-region" data-arg="${esc(r)}"><h3>${esc(r)}</h3><div class="v">${pct(g.cont,g.farms)}%</div><div class="s">${fmt(g.cont)} из ${fmt(g.farms)} хозяйств · ${fmt(g.c)} контрактов · ${short(g.sales)} ₸</div></div>`}).join('')}</div>
   <div class="spread"><span class="muted">${reg?esc(reg)+' · ':''}${list.length} районов. Нажмите на район, чтобы увидеть хозяйства.</span>${reg?'<button class="btn sm" data-act="pick-region" data-arg="">Все области</button>':''}</div>
   <div class="tbl"><table><thead><tr><th>Район</th><th>Менеджеры</th><th class="r">Пашня, га</th><th class="r">Хозяйств</th><th style="min-width:130px">Охвачено</th><th class="r">Контрактов</th><th class="r">Реализация</th></tr></thead><tbody>${list.map(d=>`<tr class="click" data-act="open-dist" data-id="${d.id}"><td><b>${esc(d.name)}</b>${reg?'':`<div class="muted" style="font-size:12px">${esc(d.region)}</div>`}${d.dist?`<div class="muted" style="font-size:12px">${esc(d.dist)} км</div>`:''}</td><td>${esc(d.managerRaw||'')}</td><td class="r num">${d.area?fmt(d.area):''}</td><td class="r num">${d.farmCount?fmt(d.farmCount):''}</td><td>${d.farmCount?`<div style="display:flex;gap:8px;align-items:center"><span class="num" style="width:36px">${pct(d.contacted||0,d.farmCount)}%</span><div class="meter" style="flex:1"><i style="width:${pct(d.contacted||0,d.farmCount)}%"></i></div></div>`:''}</td><td class="r num">${d.contracts?fmt(d.contracts):''}</td><td class="r num">${d.sales?money(d.sales):''}</td></tr>`).join('')}</tbody></table></div>`;
@@ -1794,6 +1795,73 @@ function pkInit(v){if(!v||!v.client||!farmIdx)return null;let ff=v.fid?farmIdx.f
   return ff?{fid:ff[9],u:ff[7],did:ff[8],name:String(v.client).trim()===ff[0]?ff[0]:String(v.client).trim(),where:farmWhere(ff)}:null}
 function pkChoose(p,f){pkSet(p,{fid:f[9],u:f[7],did:f[8],name:f[0],where:farmWhere(f)})}
 const pkFields=(p,name)=>{const n=((pkEl(p,'client')||{}).value||name||'').trim();return PK[p]&&PK[p].name===n?{fid:PK[p].fid,fu:PK[p].u,fdist:PK[p].did}:{}};
+
+/* ===== Карта хозяйств (бета: видна только владельцу CRM, пока не опубликована для всех) ===== */
+const MAPB_UIDS=['u_hgT9ICEs5lsbeakc9Uzojg'];
+let MAPB=false,rmap=false,GEO=null,mapObj=null,mapF={reg:'',did:'',mgr:'',st:{client:1,contact:1,none:1,refused:1}};
+const ST_COL={client:'#2e7d32',contact:'#e08a00',none:'#8a8f98',refused:'#c62828'};
+const geoKey=(rg,dn,s)=>rg+'|'+dn+'|'+s;
+function loadAsset(tag,attrs){return new Promise((res,rej)=>{const e=document.createElement(tag);Object.assign(e,attrs);e.onload=res;e.onerror=rej;document.head.appendChild(e)})}
+let leafP=null;
+function leaflet(){if(window.L&&L.markerClusterGroup)return Promise.resolve();if(leafP)return leafP;
+  const b='https://cdnjs.cloudflare.com/ajax/libs/';
+  leafP=Promise.all([loadAsset('link',{rel:'stylesheet',href:b+'leaflet/1.9.4/leaflet.min.css'}),loadAsset('link',{rel:'stylesheet',href:b+'leaflet.markercluster/1.5.3/MarkerCluster.css'}),loadAsset('link',{rel:'stylesheet',href:b+'leaflet.markercluster/1.5.3/MarkerCluster.Default.css'})])
+   .then(()=>loadAsset('script',{src:b+'leaflet/1.9.4/leaflet.min.js'})).then(()=>loadAsset('script',{src:b+'leaflet.markercluster/1.5.3/leaflet.markercluster.js'}));return leafP}
+async function loadGeo(){if(GEO)return GEO;try{const g=await db.collection('geo').doc('places').get();GEO=(g.exists&&g.data().m)||{}}catch(e){GEO={}}return GEO}
+function farmXY(r){if(r[14]!=null&&r[15]!=null)return [r[14],r[15],'manual'];const g=GEO&&GEO[geoKey(r[2],r[1],r[12])];return g&&g[0]!=null?[g[0],g[1],g[2]]:null}
+function mapRows(){const seen=new Set();return (farmIdx||[]).filter(r=>{const k=r[8]+'|'+r[9];if(seen.has(k))return false;seen.add(k);
+  if(mapF.reg&&r[2]!==mapF.reg)return false;if(mapF.did&&r[8]!==mapF.did)return false;if(!mapF.st[r[4]||'none'])return false;
+  if(mapF.mgr&&!(r[13]||'').includes(mapF.mgr.split(' ')[0]))return false;return true})}
+function vMap(){
+  const D=S.districts,regs=[...new Set(D.map(d=>d.region))].sort();
+  const dl=D.filter(d=>!mapF.reg||d.region===mapF.reg).sort((a,b)=>a.name.localeCompare(b.name,'ru'));
+  const dd=[...new Map(dl.map(d=>[d.id,d])).values()];
+  setTimeout(drawMap,0);
+  return `<div class="panel" style="margin-bottom:10px"><div class="row" style="gap:8px;align-items:center">
+   <button class="btn sm" data-act="reach-list">← Список</button>
+   <select id="mf-reg"><option value="">Все области</option>${regs.map(r=>`<option${r===mapF.reg?' selected':''}>${esc(r)}</option>`).join('')}</select>
+   <select id="mf-did"><option value="">Все районы</option>${dd.map(d=>`<option value="${d.id}"${d.id===mapF.did?' selected':''}>${esc(d.name)}</option>`).join('')}</select>
+   <select id="mf-mgr"><option value="">Все менеджеры</option>${managers().map(m=>`<option${m===mapF.mgr?' selected':''}>${esc(m)}</option>`).join('')}</select>
+   ${Object.entries(FSTAGE).map(([k,n])=>`<label class="row" style="gap:4px;font-size:13px"><input type="checkbox" data-mst="${k}"${mapF.st[k]?' checked':''}><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${ST_COL[k]}"></span>${n}</label>`).join('')}
+   <span class="muted" id="mf-cnt" style="margin-left:auto"></span></div>
+   <div class="muted" style="font-size:12px;margin-top:6px">Бета — видно только вам. Точка — центр населённого пункта; полая точка — село не найдено, поставлено в центр района. Точку можно переставить из всплывающей карточки.</div></div>
+  <div id="rmap" style="height:70vh;min-height:420px;border-radius:12px;overflow:hidden;border:1px solid var(--line)"></div>
+  <details class="panel" style="margin-top:10px"><summary id="mf-miss">Без координат</summary><div id="mf-misslist" class="muted" style="font-size:13px;margin-top:6px"></div></details>`;
+}
+async function drawMap(){
+  const el=document.getElementById('rmap');if(!el)return;
+  el.innerHTML='<div class="muted" style="padding:20px">Загружаю карту…</div>';
+  try{await leaflet()}catch(e){el.innerHTML='<div style="padding:20px">Не удалось загрузить библиотеку карты. Проверьте интернет и обновите страницу.</div>';return}
+  if(!farmIdx)await loadFarmIdx();await loadGeo();
+  if(!document.getElementById('rmap'))return;el.innerHTML='';
+  const view=mapObj&&mapObj._loaded?[mapObj.getCenter(),mapObj.getZoom()]:null;
+  if(mapObj){try{mapObj.remove()}catch(e){}}
+  mapObj=L.map(el,{preferCanvas:false}).setView(view?view[0]:[52.8,68.5],view?view[1]:6);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18,attribution:'© OpenStreetMap'}).addTo(mapObj);
+  const cl=L.markerClusterGroup({showCoverageOnHover:false,maxClusterRadius:45,spiderfyOnMaxZoom:true,iconCreateFunction:c=>{const ms=c.getAllChildMarkers(),n=ms.length,k=ms.filter(m=>m._r&&m._r[4]==='client').length,ct=ms.filter(m=>m._r&&m._r[4]==='contact').length;
+  const sz=n<10?30:n<50?36:44,a=k/n*360,b=(k+ct)/n*360;
+  return L.divIcon({className:'',iconSize:[sz,sz],html:`<div title="Клиентов: ${k}, был контакт: ${ct}, всего: ${n}" style="width:${sz}px;height:${sz}px;border-radius:50%;background:conic-gradient(${ST_COL.client} 0 ${a}deg,${ST_COL.contact} ${a}deg ${b}deg,${ST_COL.none} ${b}deg 360deg);display:flex;align-items:center;justify-content:center"><span style="background:#fff;color:#222;border-radius:50%;width:${sz-10}px;height:${sz-10}px;display:flex;align-items:center;justify-content:center;font:600 12px sans-serif">${n}</span></div>`})}});
+  const rows=mapRows(),miss=[],pts=[];
+  for(const r of rows){const xy=farmXY(r);if(!xy||xy[2]==='none'){miss.push(r);continue}
+    const col=ST_COL[r[4]]||ST_COL.none,hollow=xy[2]==='district';
+    const ic=L.divIcon({className:'',html:`<span style="display:block;width:14px;height:14px;border-radius:50%;border:2px solid ${col};background:${hollow?'#fff':col};box-shadow:0 0 0 1px #fff"></span>`,iconSize:[14,14],iconAnchor:[7,7]});
+    const m=L.marker([xy[0],xy[1]],{icon:ic,title:r[0]});m._r=r;
+    m.bindPopup(()=>mapPopup(r,xy),{maxWidth:320});pts.push([xy[0],xy[1]]);cl.addLayer(m)}
+  mapObj.addLayer(cl);mapObj._cl=cl;
+  mapObj.invalidateSize();if(!view&&pts.length){const fit=()=>{mapObj.invalidateSize();mapObj.fitBounds(L.latLngBounds(pts),{padding:[30,30],maxZoom:11})};fit();setTimeout(fit,300)}
+  const c=document.getElementById('mf-cnt');if(c)c.textContent=`На карте: ${rows.length-miss.length} из ${rows.length}`;
+  const ms=document.getElementById('mf-miss');if(ms)ms.textContent=`Без координат: ${miss.length}`;
+  const ml=document.getElementById('mf-misslist');if(ml)ml.innerHTML=miss.slice(0,300).map(r=>`${esc(r[0])} — ${esc(r[2])}, ${esc(r[1])}${r[12]?', '+esc(r[12]):', село не указано'}`).join('<br>')||'—';
+}
+function mapPopup(r,xy){const d=byId(S.districts,r[8]);const can=r[7]===myUid||isAdm()||grantOk(r[7],d);
+  return `<div style="font-size:13px;line-height:1.45"><b>${esc(r[0])}</b><br>${esc(r[2])}, ${esc(r[1])}${r[12]?' · '+esc(r[12]):''}<br>Этап: <b>${FSTAGE[r[4]]||'—'}</b>${r[13]?'<br>Менеджер: '+esc(r[13]):''}${r[10]?'<br><span style="color:#666">'+esc(String(r[10]).slice(0,160))+'</span>':''}
+  ${xy[2]==='district'?'<br><i>Село не найдено — точка в центре района</i>':xy[2]==='manual'?'<br><i>Точка поставлена вручную</i>':''}
+  <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap"><button class="btn sm" data-act="map-card" data-arg="${r[7]}|${r[8]}|${r[9]}">Карточка</button>${can?`<button class="btn sm" data-act="map-move" data-arg="${r[8]}|${r[9]}">Переставить точку</button>`:''}</div></div>`}
+function mapMove(arg){if(!mapObj||!mapObj._cl)return;const [did,fid]=arg.split('|');let mk=null;mapObj._cl.eachLayer(m=>{if(m._r&&m._r[8]===did&&m._r[9]===fid)mk=m});if(!mk)return;
+  mapObj.closePopup();const ll=mk.getLatLng();mapObj._cl.removeLayer(mk);mk.addTo(mapObj);mk.dragging.enable();mapObj.setView(ll,Math.max(mapObj.getZoom(),13));
+  toast('Перетащите точку на нужное место — сохранится автоматически');
+  mk.once('dragend',async()=>{const p=mk.getLatLng(),r=mk._r;try{await db.collection('mgr/'+r[7]+'/districts/'+r[8]+'/farms').doc(r[9]).update({lat:+p.lat.toFixed(5),lon:+p.lng.toFixed(5)});r[14]=+p.lat.toFixed(5);r[15]=+p.lng.toFixed(5);idxSave();toast('Точка сохранена')}catch(e){toast('Не удалось сохранить точку')}mk.dragging.disable()})}
+
 /* районы, куда пользователь может поместить хозяйство: свои, с совместным доступом, у руководства — все */
 function editDists(){return S.districts.filter(x=>(!x.mirror||isOwner)&&(isAdm()||(x._us||[]).includes(myUid)||!!shareU(x))).slice().sort((a,b)=>(a.region||'').localeCompare(b.region||'','ru')||a.name.localeCompare(b.name,'ru'))}
 /* перенос хозяйства в другой район: тот же id, запись в кабинете нового района, старая удаляется */
@@ -1819,7 +1887,7 @@ async function farmCard(p){const k=PK[p];if(!k){toast('Сначала выбер
   let sn;try{sn=await db.collection('mgr/'+k.u+'/districts/'+k.did+'/farms').doc(k.fid).get()}catch(e){toast('Не удалось открыть хозяйство');return}
   if(!sn.exists){toast('Хозяйство не найдено в охвате');return}
   const f={id:k.fid,...sn.data(),_u:k.u};
-  farmForm(f.id,{f,d,host:'#modal2',after:v=>{if(v.name&&v.name!==k.name){PK[p]={...k,name:v.name};const inp=pkEl(p,'client');if(inp)inp.value=v.name}pkMark(p);toast('Карточка хозяйства сохранена')}});
+  farmForm(f.id,{f,d,host:'#modal2',after:v=>{if(p==='map'){toast('Карточка хозяйства сохранена');setTimeout(()=>{if(rmap)drawMap()},1500);return}if(v.name&&v.name!==k.name){PK[p]={...k,name:v.name};const inp=pkEl(p,'client');if(inp)inp.value=v.name}pkMark(p);toast('Карточка хозяйства сохранена')}});
 }
 function newFarmForm(name,p){
   const ds=S.districts.filter(d=>!d.mirror||isOwner).slice().sort((a,b)=>(a.region||'').localeCompare(b.region||'','ru')||a.name.localeCompare(b.name,'ru'));
@@ -3075,6 +3143,10 @@ document.addEventListener('click',async e=>{
   
   else if(a==='kpi-bad'){jf={mgr:arg,type:'',st:'bad',q:'',lim:200};tab='journal';ls('crm_tab','journal');render()}
   else if(a==='pk-card'){farmCard(arg)}
+  else if(a==='reach-map'){rmap=true;render()}
+  else if(a==='reach-list'){rmap=false;if(mapObj){try{mapObj.remove()}catch(e){}mapObj=null}render()}
+  else if(a==='map-card'){const [u,did,fid]=arg.split('|');const d=byId(S.districts,did);PK.map={fid,u,did,name:'',where:d?(d.region+', '+d.name):''};farmCard('map')}
+  else if(a==='map-move'){mapMove(arg)}
   else if(a==='pk-new'){newFarmForm(pkEl(arg,'client').value.trim(),arg);pkEl(arg,'list').hidden=true}
   else if(a==='qa-add'){
     if(t.dataset.busy)return;
@@ -3100,6 +3172,10 @@ document.addEventListener('change',async e=>{
   else if(t.id==='jf-type'){jf.type=t.value;jf.lim=200;fillJournal()}
   else if(t.id==='jf-st'){jf.st=t.value;jf.lim=200;fillJournal()}
   else if(t.id==='ff-stage'){ff.stage=t.value;fillFarms()}
+  else if(t.id==='mf-reg'){mapF.reg=t.value;mapF.did='';if(mapObj){try{mapObj.remove()}catch(e){}mapObj=null}render()}
+  else if(t.id==='mf-did'){mapF.did=t.value;if(mapObj){try{mapObj.remove()}catch(e){}mapObj=null}drawMap()}
+  else if(t.id==='mf-mgr'){mapF.mgr=t.value;drawMap()}
+  else if(t.dataset&&t.dataset.mst){mapF.st[t.dataset.mst]=t.checked?1:0;drawMap()}
   else if(t.id==='ff-mgr'){ff.mgr=t.value;fillFarms()}
   else if(t.dataset&&t.dataset.rk){const f=FARMS.find(x=>x.id===t.dataset.rk);if(f){t.className='rk '+(t.value?'rk-'+RISK[t.value].c:'');await fPatch(f,{risk:t.value})}}
   else if(t.dataset&&t.dataset.fm){const f=FARMS.find(x=>x.id===t.dataset.fm);if(f&&await fPatch(f,{manager:t.value}))toast('Менеджер: '+(t.value||'не назначен'))}
