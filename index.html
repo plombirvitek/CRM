@@ -2439,8 +2439,13 @@ const CATALOG=[{"name":"Вулкан 200","group":"Протравители","st
 const NAME_FIX={"Вулкан 200":["Вулкан 200, т.п.","текучая паста"],"МАКСУС":["Максус, к.с.","концентрат суспензии"],"РЕКСОЛ":["Рексол 6%, к.с.","концентрат суспензии"],"Тридан":["Тридан, к.с.","концентрат суспензии"],"Алгоритм":["Алгоритм, к.э.","концентрат эмульсии"],"АНТАРЕС":["Антарес, к.э.","концентрат эмульсии"],"Арбалет":["Арбалет 60%, с.п.","смачивающийся порошок"],"АРГАМАК":["Аргамак, в.д.г.","водно-диспергируемые гранулы"],"Аргамак ДФ":["Аргамак ДФ, в.д.г.","водно-диспергируемые гранулы"],"АСТЭРИКС КНР":["Астэрикс, с.э.","суспензионная эмульсия"],"Атриум":["Атриум, в.д.г.","водно-диспергируемые гранулы"],"БЕНТАСИЛ КНР":["Бентасил, в.р.","водный раствор"],"Галлон":["Галлон, к.э.","концентрат эмульсии"],"Герб 900":["Герб 900, к.э.","концентрат эмульсии"],"ДИФИЛАЙН":["Дифилайн, м.д.","масляная дисперсия"],"КЛОРИТ":["Клорит, в.р.","водный раствор"],"Клорузо":["Клорузо, м.д.","масляная дисперсия"],"Кумпарсита":["Кумпарсита, к.э.","концентрат эмульсии"],"ЛАРТ":["Ларт, в.р.","водный раствор"],"МЕТРИБУТ":["Метрибут, к.с.","концентрат суспензии"],"ПАНАМЕРА":["Панамера, к.э.","концентрат эмульсии"],"Рисовод":["Рисовод, м.д.","масляная дисперсия"],"СЕРП":["Серп, в.р.к.","водно-растворимый концентрат"],"СМИЛОДОН":["Смилодон, к.э.","концентрат эмульсии"],"ТИФИ":["Тифи, в.д.г.","водно-диспергируемые гранулы"],"ТОМАГАВК":["Томагавк, в.р.","водный раствор"],"ТОМАГАВК ЭКСТРА":["Томагавк Экстра, в.д.г.","водно-диспергируемые гранулы"],"Триумф 48%":["Триумф 48%, в.р.","водный раствор"],"Флазер":["Флазер, к.с.","концентрат суспензии"],"ФМР ГА 100":["ФМР ГА 100, к.с.","концентрат суспензии"],"Фомесофт КНР":["Фомесофт, в.р.","водный раствор"],"Формуляр":["Формуляр, к.э.","концентрат эмульсии"],"Формуляр Классик":["Формуляр Классик, э.м.в.","эмульсия масло-в-воде"],"ЭНДИМИОН КНР":["Эндимион, к.э.","концентрат эмульсии"],"Альфашанс":["Альфашанс, к.э.","концентрат эмульсии"],"КИНЖАЛ":["Кинжал, к.с.","концентрат суспензии"],"КЛОНРИН":["Клонрин, к.э.","концентрат эмульсии"],"МЕТОМАКС":["Метомакс, к.с.","концентрат суспензии"],"Прокроп":["Прокроп, к.э.","концентрат эмульсии"],"Тиамакс — протравитель":["Тиамакс, к.с.","концентрат суспензии"],"Тиамакс — инсектицид":["Тиамакс, к.с.","концентрат суспензии"],"ШАМАН":["Шаман, к.э.","концентрат эмульсии"],"ТриЗаРа Супер":["ТриЗаРа Супер, к.э.","концентрат эмульсии"],"Диего (ФМР 250200)":["Диего, к.с.","концентрат суспензии"],"Инспектор":["Инспектор, к.э.","концентрат эмульсии"],"ТИНАЗОЛ":["Тиназол, к.э.","концентрат эмульсии"],"ТРИАЗОЛ":["Триазол, к.э.","концентрат эмульсии"],"ФАНФАН":["Фанфан, к.э.","концентрат эмульсии"],"Футляр (ФМР М350)":["Футляр, в.э.","водная эмульсия"],"Скорпион":["Скорпион, в.р.","водный раствор"],"Супертэн НЭО":["Супертэн НЭО, м.д.","масляная дисперсия"]};
 CATALOG.forEach(p=>{const f=NAME_FIX[p.name];if(f){p.oldName=p.name;p.name=f[0];p.formFull=f[1]}});
 const cropN=c=>{c=String(c||'').trim();if(c==='Лён')return 'Лен';if(c==='Свекла сахарная')return 'Сахарная свекла';return c};
-const CAT_CROPS=(()=>{const m={};CATALOG.forEach(p=>{const s=new Set();p.regs.forEach(r=>(r.cropTags||[]).forEach(c=>{c=cropN(c);if(c.length<=26)s.add(c)}));p._crops=[...s];s.forEach(c=>m[c]=(m[c]||0)+1)});return Object.entries(m).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0],'ru'))})();
-const CAT_GROUPS=[...new Set(CATALOG.map(p=>p.group))];
+/* не культуры: назначения ПАВ (с чем смешивать) в фильтр «Культура» не попадают */
+const NONCROP=new Set(['Почвенные гербициды','Внекорневые подкормки','Совместно с гербицидами','Рабочий раствор пестицидов']);
+/* почвенное действие гербицидов по д.в. и регистрации: pre — зарегистрирован внесением в почву (до посева/до всходов); res — по вегетации, но с заметным почвенным последействием */
+const SOIL={'алгоритм':'pre','атриум':'pre','герб 900':'pre','дифилайн':'pre','метрибут':'pre','флазер':'pre','серп':'pre','клорузо':'res','арбалет':'res','фомесофт':'res','супертэн нэо':'res'};
+const soilOf=p=>p.group==='Гербициды'?SOIL[String(p.name).toLowerCase().split(',')[0].replace(/\s+(кнр|\d+%)$/,'').trim()]||'':'';
+const CAT_CROPS=(()=>{const m={};CATALOG.forEach(p=>{const s=new Set();p.regs.forEach(r=>(r.cropTags||[]).forEach(c=>{c=cropN(c);if(c.length<=26&&!NONCROP.has(c))s.add(c)}));p._crops=[...s];s.forEach(c=>m[c]=(m[c]||0)+1)});return Object.entries(m).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0],'ru'))})();
+const CAT_GROUPS=(()=>{const g=[...new Set(CATALOG.map(p=>p.group))];const i=g.indexOf('Гербициды');g.splice(i<0?g.length:i+1,0,{v:'__soil',l:'  ↳ почвенные гербициды'},{v:'__soilres',l:'  ↳ с почвенным действием (вкл. последействие)'});return g})();
 const KIND_NAMES={cur:'Действующие регистрации',nw:'Новые препараты 2027–2028',ext:'Расширение регистраций'};
 const CAT_STAT=Object.values(KIND_NAMES);
 CATALOG.forEach(p=>{
@@ -2459,7 +2464,7 @@ CATALOG.forEach(p=>p._t=prodText(p));
 function vProducts(){
   const sub=`<div class="row" role="group" aria-label="Раздел"><button class="btn sm${cf.sub==='cat'?' pri':''}" data-act="prod-sub" data-arg="cat">Каталог ФМРус · ${CATALOG.length}</button><button class="btn sm${cf.sub==='own'?' pri':''}" data-act="prod-sub" data-arg="own">Цены и сезон · ${S.products.length}</button></div>`;
   if(cf.sub==='own')return `<div class="spread">${sub}${isOwner?'<button class="btn pri" data-act="new-product">+ Позиция</button>':''}</div>`+ownProducts();
-  const opt=(arr,v,all)=>`<option value="">${all}</option>`+arr.map(x=>{const val=Array.isArray(x)?x[0]:x,lab=Array.isArray(x)?`${x[0]} · ${x[1]}`:x;return `<option value="${esc(val)}"${val===v?' selected':''}>${esc(lab)}</option>`}).join('');
+  const opt=(arr,v,all)=>`<option value="">${all}</option>`+arr.map(x=>{const val=x&&x.v?x.v:Array.isArray(x)?x[0]:x,lab=x&&x.v?x.l:Array.isArray(x)?`${x[0]} · ${x[1]}`:x;return `<option value="${esc(val)}"${val===v?' selected':''}>${esc(lab)}</option>`}).join('');
   return `<div class="spread">${sub}<span class="muted" id="cf-count"></span></div>
   <div class="row" style="margin-bottom:12px"><input id="cf-q" type="search" placeholder="Препарат, д.в., культура, вредитель…" value="${esc(cf.q)}" style="flex:1 1 220px;min-width:0">
   <select id="cf-group" aria-label="Группа">${opt(CAT_GROUPS,cf.group,'Все группы')}</select>
@@ -2471,7 +2476,7 @@ function vProducts(){
 function fillCatalog(){
   const el=$('#cf-list');if(!el)return;
   const q=cf.q.toLowerCase().replace(/ё/g,'е').trim().split(/\s+/).filter(Boolean);
-  const a=CATALOG.map((p,i)=>[p,i]).filter(([p])=>(!cf.group||p.group===cf.group)&&(!cf.st||stGrp(p,cf.st))&&(!cf.crop||p._crops.includes(cf.crop))&&(!cf.obj||p.regs.some(r=>r.objClass===cf.obj))&&q.every(w=>p._t.includes(w)));
+  const a=CATALOG.map((p,i)=>[p,i]).filter(([p])=>(!cf.group||(cf.group==='__soil'?soilOf(p)==='pre':cf.group==='__soilres'?!!soilOf(p):p.group===cf.group))&&(!cf.st||stGrp(p,cf.st))&&(!cf.crop||p._crops.includes(cf.crop))&&(!cf.obj||p.regs.some(r=>r.objClass===cf.obj))&&q.every(w=>p._t.includes(w)));
   $('#cf-count').textContent=`Найдено: ${a.length} из ${CATALOG.length}`;
   el.innerHTML=a.length?a.map(([p,i])=>{
     const meta=(p.catalogInfo&&p.catalogInfo.meta)||{};
@@ -2480,7 +2485,7 @@ function fillCatalog(){
     <div class="muted" style="font-size:12px">${esc(p.active||'')}</div>
     ${meta.purpose?`<div class="pp">${esc(meta.purpose)}</div>`:''}
     <div class="row" style="gap:4px;margin-top:auto">${cr.map(c=>`<span class="chip">${esc(c)}</span>`).join('')}${p._crops.length>5?`<span class="chip">+${p._crops.length-5}</span>`:''}</div>
-    <div><span class="chip ${kindChip(p)[0]}">${esc(kindChip(p)[1])}</span></div></div>`}).join(''):empty('Ничего не найдено. Измените запрос или сбросьте фильтры.');
+    <div class="row" style="gap:4px"><span class="chip ${kindChip(p)[0]}">${esc(kindChip(p)[1])}</span>${soilOf(p)?`<span class="chip acc" title="${soilOf(p)==='pre'?'Зарегистрирован для внесения в почву до посева или до всходов':'Применяется по вегетации, но действует и через почву — сдерживает следующие волны сорняков; учитывать в севообороте'}">${soilOf(p)==='pre'?'почвенный':'почвенное последействие'}</span>`:''}</div></div>`}).join(''):empty('Ничего не найдено. Измените запрос или сбросьте фильтры.');
 }
 function richText(s){
   const lines=String(s||'').split('\n');let out='',ul=false;
