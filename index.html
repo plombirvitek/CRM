@@ -751,6 +751,7 @@ function rebuild0(c){
   const seen=new Set(),out=[];
   for(const u of order)for(const d of m[u]){if(seen.has(d.id))continue;seen.add(d.id);out.push({...d,_u:u})}
   S[c]=out;
+  if(c==='quotes'&&typeof qBannerPaint==='function')qBannerPaint();
 }
 function sub(c,u){
   const k=c+'|'+u;if(subs[k]||!db)return;
@@ -2086,6 +2087,26 @@ function qDocKp(q){
   <table style="width:100%;margin-top:46px"><tr><td style="vertical-align:bottom">${esc(FIRM.dir)}<br>${esc(FIRM.short)}</td><td style="text-align:right;vertical-align:bottom">${esc(FIRM.dirShort)}</td></tr></table>
   <div style="position:absolute;left:56px;right:56px;bottom:34px;border-top:3px solid #8a5a1c;padding-top:6px;text-align:center;font-size:11.5px;line-height:1.3">${esc(FIRM.addr)}<br>БИН ${esc(FIRM.bin)} · ${esc(FIRM.bank)} · БИК ${esc(FIRM.bik)} · ${esc(FIRM.iban)}</div></div>`;
 }
+/* ---- согласование: директор видит заявки «Отправлена шефу» сразу при входе, пока не согласует ---- */
+const Q_APPROVERS=['u_myakisheva','u_hgT9ICEs5lsbeakc9Uzojg'];   // кто может согласовать/отклонить
+const Q_NAG=['u_myakisheva'];                                      // кому висит уведомление до согласования
+const qCanApprove=()=>Q_APPROVERS.includes(myUid);
+function qPending(){return S.quotes.filter(q=>q.status==='sent').sort((a,b)=>(a.sentAt||a.updatedAt||0)-(b.sentAt||b.updatedAt||0))}
+function qSeen(){try{return JSON.parse(localStorage.getItem('crm_qseen')||'{}')}catch(e){return {}}}
+function qBanner(){
+  if(Q_NAG.includes(myUid)){const L=qPending();if(!L.length)return '';
+    return `<div class="banner" style="display:block;border-color:var(--warn,#e08a00)"><b>🔔 Ждут вашего согласования: ${L.length} ${L.length===1?'заявка':L.length<5?'заявки':'заявок'} на КП</b>
+    <div style="margin-top:8px;display:grid;gap:6px">${L.map(q=>`<div class="row" style="gap:8px;align-items:center;flex-wrap:wrap"><span style="min-width:0;flex:1 1 260px">№ ${esc(q.num||'')} · <b>${esc(q.client||'')}</b> · ${esc(q.manager||'')} · ${nfmt(q.total||0)} ₸${q.date?' · '+esc(dmy(q.date)):''}</span>
+      <button class="btn sm" data-act="qa-open" data-id="${q.id}">Открыть</button><button class="btn sm pri" data-act="qa-ok" data-id="${q.id}">✓ Согласовать</button><button class="btn sm" data-act="qa-no" data-id="${q.id}">✕ Отклонить</button></div>`).join('')}</div></div>`}
+  /* автору — что решили по его заявкам (пока не закроет) */
+  const seen=qSeen(),mine=S.quotes.filter(q=>q._u===myUid&&(q.status==='approved'||q.status==='rejected')&&q.decidedAt&&!seen[q.id+'|'+q.decidedAt]);
+  if(!mine.length)return '';
+  return `<div class="banner" style="display:block">${mine.map(q=>`<div class="row" style="gap:8px;align-items:center;flex-wrap:wrap"><span style="flex:1 1 260px">${q.status==='approved'?'✅ Согласована':'❌ Отклонена'} заявка № ${esc(q.num||'')} · ${esc(q.client||'')}${q.status==='rejected'&&q.rejectNote?' — '+esc(q.rejectNote):''}${q.decidedBy?' ('+esc(q.decidedBy)+')':''}</span><button class="btn sm" data-act="qa-open" data-id="${q.id}">Открыть</button><button class="btn sm" data-act="qa-seen" data-id="${q.id}" data-arg="${q.decidedAt}">Понятно</button></div>`).join('')}</div>`;
+}
+async function qBannerPaint(){const b=$('#banner');if(b&&ready&&db&&myUid&&!(regReady&&!isOwner&&!myReg))b.innerHTML=qBanner()}
+async function qDecide(id,ok,note){const q=byId(S.quotes,id);if(!q)return;
+  const patch={status:ok?'approved':'rejected',decidedAt:Date.now(),decidedBy:({u_myakisheva:'Мякишева О.А.',u_hgT9ICEs5lsbeakc9Uzojg:'Виктор'})[myUid]||(myReg&&myReg.manager)||'Директор',rejectNote:ok?'':(note||'')};
+  try{await db.collection('mgr/'+q._u+'/quotes').doc(id).update(patch);Object.assign(q,patch);for(const arr of Object.values(store.quotes||{}))(arr||[]).forEach(x=>{if(x.id===id)Object.assign(x,patch)});qBannerPaint();toast(ok?'Заявка № '+(q.num||'')+' согласована':'Заявка № '+(q.num||'')+' отклонена');render()}catch(e){toast('Не удалось сохранить решение: '+((e&&e.code)||'ошибка'))}}
 /* ---- список и редактор ---- */
 function qList(){
   const L=S.quotes.slice().sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
@@ -2144,6 +2165,8 @@ function qEdit(id){
   const set=(k,v)=>{const e=$('#q_'+k);if(e)e.value=v==null?'':v};
   ['dept','manager','date','status','client','buyer','payMode','prepayDate','finalDate','requisites','note','kpDate','delivery','c1','c2','c3','c4'].forEach(k=>set(k,QW[k]));
   set('payv',QW.payMode==='sum'?QW.first:QW.pct);$('#q_numv').textContent=QW.num||'';
+  if(!qCanApprove()){const so=$('#q_status');if(so)[...so.options].forEach(o=>{if((o.value==='approved'||o.value==='rejected')&&o.value!==QW.status)o.disabled=true})}
+  if(QW.status==='rejected'&&QW.rejectNote){const mm=$('#q-msg');if(mm)mm.textContent='Отклонена: '+QW.rejectNote}
   qRows();qUpd();
   QCL=clientList();
   m.oninput=m.onchange=e=>{if(!QW||!e.target.closest('#qf'))return;const t=e.target;
@@ -2191,8 +2214,11 @@ async function qSave(quiet){
   const items=c.items.map(i=>({name:i.name,qty:nf(i.qty),unit:i.unit||'л',price:nf(i.price),date:i.date||''}));
   const id=q.id||newId('quotes');
   const data={...q,id:undefined,items,total:c.total,firstSum:c.first,pct:c.pct,num:q.num,manager:q.manager||meDef(),updatedAt:Date.now()};
-  delete data.id;delete data._m;
-  const ok=await put('quotes',id,data);
+  delete data.id;delete data._m;delete data._u;
+  const prev=q.id?byId(S.quotes,q.id):null,owner=(prev&&prev._u)||myUid;
+  if(!qCanApprove()&&(data.status==='approved'||data.status==='rejected')&&(!prev||prev.status!==data.status)){data.status=prev?prev.status:'sent';const e=$('#q_status');if(e)e.value=data.status;toast('Согласовать или отклонить заявку может только директор')}
+  if(data.status==='sent'&&(!prev||prev.status!=='sent')){data.sentAt=Date.now();delete data.rejectNote}
+  const ok=owner===myUid?await put('quotes',id,data):await putAt(owner,'quotes',id,data);
   if(ok){QW.id=id;if(!quiet)$('#q-msg').textContent='Сохранено.'}
   return ok;
 }
@@ -2795,7 +2821,7 @@ function render(){
   if(ready&&db&&myUid&&!isOwner&&regReady&&!myReg){
     $('#banner').innerHTML='<div class="banner">Вы ещё не выбрали, кто вы. <button class="btn sm pri" data-act="ask-who">Выбрать</button></div>';
     if(!whoShown&&$('#modal').hidden){whoShown=true;askWho()}
-  }else if(db&&myUid)$('#banner').innerHTML='';
+  }else if(db&&myUid)$('#banner').innerHTML=ready?qBanner():'';
   const v=$('#view');
   if(!ready){v.innerHTML='<div class="empty">Загрузка…</div>';return}
   if(tab==='data'&&!isOwner)tab='dash';
@@ -3143,6 +3169,10 @@ document.addEventListener('click',async e=>{
   
   else if(a==='kpi-bad'){jf={mgr:arg,type:'',st:'bad',q:'',lim:200};tab='journal';ls('crm_tab','journal');render()}
   else if(a==='pk-card'){farmCard(arg)}
+  else if(a==='qa-open'){qEdit(id)}
+  else if(a==='qa-ok'){qDecide(id,true)}
+  else if(a==='qa-no'){const q=byId(S.quotes,id);openForm({title:'Отклонить заявку № '+((q&&q.num)||''),fields:[{k:'note',l:'Причина (увидит менеджер)',t:'textarea',w:1}],values:{},onSave:async v=>{await qDecide(id,false,(v.note||'').trim());return true}})}
+  else if(a==='qa-seen'){try{const o=qSeen();o[id+'|'+arg]=1;localStorage.setItem('crm_qseen',JSON.stringify(o))}catch(e){}render()}
   else if(a==='reach-map'){rmap=true;render()}
   else if(a==='reach-list'){rmap=false;if(mapObj){try{mapObj.remove()}catch(e){}mapObj=null}render()}
   else if(a==='map-card'){const [u,did,fid]=arg.split('|');const d=byId(S.districts,did);PK.map={fid,u,did,name:'',where:d?(d.region+', '+d.name):''};farmCard('map')}
