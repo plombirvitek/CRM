@@ -52,7 +52,10 @@ for dev in devs:
     for i in range(days):
         day=d1+dt.timedelta(days=i)
         rep=http(f"{G}/api/reports/devices?deviceId={dev['id']}&template=Parkings",{'period':{'from':f'{day}T00:00:00+05:00','to':f'{day}T23:59:59+05:00'}},h=A)
-        ev=[e for g in ((rep or {}).get('Parkings') or {}).get('groupedTracks',[]) for e in g.get('parkingEvents',[]) if (e.get('duration') or 0)>=900]
+        # пустой день Salam GPS иногда отдаёт списком, а не объектом — считаем, что стоянок нет
+        pk=rep.get('Parkings') if isinstance(rep,dict) else None
+        gt=pk.get('groupedTracks') if isinstance(pk,dict) else None
+        ev=[e for g in (gt if isinstance(gt,list) else []) if isinstance(g,dict) for e in (g.get('parkingEvents') or []) if isinstance(e,dict) and (e.get('duration') or 0)>=900]
         if not ev:continue
         items=[];seen=set()
         for e in sorted(ev,key=lambda e:e['start']):
