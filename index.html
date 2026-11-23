@@ -319,7 +319,7 @@ h3{color:var(--accent)}
       <select id="va" aria-label="Смотреть как менеджер" hidden></select>
       <a class="btn" id="planLink" href="plan.html" hidden style="text-decoration:none">План продаж</a>
       <a class="btn" id="wbLink" href="waybill.html" hidden style="text-decoration:none">Путевые листы</a>
-      <button class="btn pri" data-act="new-act">+ Взаимодействие</button>
+      <button class="btn pri" id="newActBtn" data-act="new-act">+ Взаимодействие</button>
     </div>
   </div>
   <div id="banner"></div>
@@ -1539,6 +1539,7 @@ function farmForm(id,ext){
 /* ---------- вкладки ---------- */
 function setTab(t){if(t==='data'&&!isOwner)t='dash';tab=t;ls('crm_tab',t);if(t!=='reach'){dist=''}render()}
 function renderTabs(){
+  {const ag=isAgro(),b1=document.getElementById('newActBtn'),b2=document.getElementById('bell');if(b1)b1.hidden=ag;if(b2)b2.hidden=ag}
   const defs=isAgro()?[['agro','Мои выезды',S.agro.length],['products','Препараты',CATALOG.length]]:[['dash','Сводка'],['journal','Журнал',S.activities.length],['kpi','KPI и план'],['reach','Охват',S.districts.length],['deals','Сделки',S.deals.filter(isOpen).length],['agro','Агроном',S.agro.length],['products','Препараты',CATALOG.length]].concat(isOwner?[['data','Данные']]:[]);
   $('#tabs').innerHTML=defs.map(([id,n,c])=>`<button class="tab" role="tab" aria-selected="${tab===id}" data-tab="${id}">${n}${c?`<span class="n">${fmt(c)}</span>`:''}</button>`).join('');
 }
