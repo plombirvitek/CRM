@@ -299,7 +299,6 @@ form.f{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 <div id="modal" hidden></div>
 <div id="toast" hidden></div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
 "use strict";
 /* ---------- helpers ---------- */
@@ -724,7 +723,7 @@ function docHtml(sh, d) {
 }
 function fileBase() { const d = driver(); return 'Путевой лист ' + String(d.name || '').split(/\s+/)[0] + ' ' + S.sheet.month; }
 function showDoc() {
-  const d = driver(), sh = S.sheet, canX = S.dl && typeof XLSX !== 'undefined';
+  const d = driver(), sh = S.sheet, canX = !!S.dl;
   $('#modal').innerHTML = '<div class="sheet wide"><div class="sheet-h"><h2>Печатная форма для бухгалтерии</h2><button type="button" class="x" data-act="close" aria-label="Закрыть">×</button></div>' +
     '<div class="row" style="margin-bottom:12px">' + (S.dl ? (canX ? '<button type="button" class="btn pri" data-act="xlsx">Скачать Excel</button>' : '') + '<button type="button" class="btn" data-act="html">Скачать для печати</button><span class="note">Файл для печати откройте в браузере и нажмите Ctrl+P.</span>' : '<span class="note">Скачивание в этом окне недоступно.</span>') + '</div>' +
     (sh.status !== 'approved' ? '<p class="note" style="margin:0 0 10px">Лист ещё не принят руководителем.</p>' : '') +
@@ -739,53 +738,84 @@ function saveHtml() {
   const html = '<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"><title>' + esc(fileBase()) + '</title><style>body{margin:0;background:#fff}' + $('#docCss').textContent + '@page{size:A4 landscape;margin:12mm}@media print{.doc{padding:0}}</style></head><body>' + docHtml(S.sheet, driver()) + '</body></html>';
   offer(fileBase() + '.html', html);
 }
-function buildXlsx(sh, d) {
-  const trips = [...sh.trips].sort(cmpDate), fills = [...sh.fills].sort(cmpDate), c = calc(sh);
-  const [y, mo] = sh.month.split('-').map(Number), R = [], F = (f, v) => ({t: 'n', f, v: v ?? 0});
-  R.push(['ТОО «ФМРус»']);
-  R.push(['Путевой лист легкового автомобиля за ' + MONTHS[mo - 1].toLowerCase() + ' ' + y + ' г.']);
-  R.push([]);
-  R.push(['Водитель', d.name || '']);
-  R.push(['Автомобиль', [d.car, d.plate].filter(Boolean).join(', ')]);
-  R.push(['Принадлежность', KIND[d.kind] || 'личный']);
-  R.push(['Топливо', d.fuel || '']);
-  R.push(['Топливная карта', d.card || '']);
-  R.push([]);
-  R.push(['Поездки']);
-  R.push(['№', 'Дата', 'Маршрут', 'Цель поездки', 'Одометр при выезде, км', 'Одометр при возвращении, км', 'Пробег, км']);
-  const t0 = R.length + 1;
-  trips.forEach((t, i) => { const r = R.length + 1, ok = t.odoStart != null && t.odoEnd != null; R.push([i + 1, dmy(t.date), t.route, t.purpose, t.odoStart, t.odoEnd, ok ? F('F' + r + '-E' + r, t.odoEnd - t.odoStart) : null]); });
-  const kmRow = R.length + 1;
-  R.push(['Итого пробег, км', null, null, null, null, null, trips.length ? F('SUM(G' + t0 + ':G' + (kmRow - 1) + ')', c.km) : 0]);
-  R.push([]);
-  R.push(['Заправки по топливной карте']);
-  R.push(['№', 'Дата', 'Примечание', 'Литры']);
-  const f0 = R.length + 1;
-  fills.forEach((f, i) => R.push([i + 1, dmy(f.date), f.note, f.liters]));
-  const fuRow = R.length + 1;
-  R.push(['Итого заправлено, л', null, null, fills.length ? F('SUM(D' + f0 + ':D' + (fuRow - 1) + ')', c.fueled) : 0]);
-  R.push([]);
-  R.push(['Движение топлива за месяц']);
-  const b = R.length + 1;
-  R.push(['Остаток на начало месяца, л', sh.fuelStart]);
-  R.push(['Заправлено за месяц, л', F('D' + fuRow, c.fueled)]);
-  R.push(['Пробег за месяц, км', F('G' + kmRow, c.km)]);
-  R.push(['Норма расхода, л/100 км', sh.norm]);
-  R.push(['Расход по норме, л', sh.norm == null ? null : F('ROUND(B' + (b + 2) + '*B' + (b + 3) + '/100,2)', c.byNorm)]);
-  R.push(['Остаток на конец месяца, л', (sh.norm == null || sh.fuelStart == null) ? null : F('B' + b + '+B' + (b + 1) + '-B' + (b + 4), c.end)]);
-  R.push([]); R.push([]);
-  R.push(['Водитель', '________________', d.name || '']);
-  R.push(['Руководитель', '________________']);
-  R.push(['Бухгалтер', '________________']);
-  const ws = XLSX.utils.aoa_to_sheet(R);
-  ws['!cols'] = [{wch: 28}, {wch: 18}, {wch: 38}, {wch: 34}, {wch: 22}, {wch: 26}, {wch: 12}];
-  ws['!merges'] = [{s: {r: 0, c: 0}, e: {r: 0, c: 6}}, {s: {r: 1, c: 0}, e: {r: 1, c: 6}}];
-  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Путевой лист');
-  return XLSX.write(wb, {bookType: 'xlsx', type: 'array'});
+async function loadExcelJS() {
+  if (window.ExcelJS) return window.ExcelJS;
+  await new Promise((ok, no) => { const sc = document.createElement('script'); sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js'; sc.onload = ok; sc.onerror = () => no(new Error('lib')); document.head.appendChild(sc); });
+  return window.ExcelJS;
 }
-function saveXlsx() {
-  try { offer(fileBase() + '.xlsx', new Blob([buildXlsx(S.sheet, driver())])); }
-  catch (e) { toast('Не удалось собрать Excel.'); }
+async function buildXlsx(sh, d) {
+  const E = await loadExcelJS();
+  const trips = [...sh.trips].sort(cmpDate), fills = [...sh.fills].sort(cmpDate), c = calc(sh);
+  const [y, mo] = sh.month.split('-').map(Number);
+  const wb = new E.Workbook(); wb.creator = 'CRM ФМРус'; wb.calcProperties.fullCalcOnLoad = true;
+  const ws = wb.addWorksheet('Путевой лист', {properties: {tabColor: {argb: 'FF7C2529'}}});
+  const BR = 'FF7C2529', GR = 'FF63666A', LN = {style: 'thin', color: {argb: 'FFBFBFBF'}}, ALL = {top: LN, bottom: LN, left: LN, right: LN};
+  const FONT = {name: 'Arial', size: 10};
+  ws.columns = [{width: 6}, {width: 12}, {width: 32}, {width: 38}, {width: 16}, {width: 16}, {width: 13}];
+  const cell = (r, col, v, st) => { const x = ws.getCell(r, col); x.value = v; x.font = {...FONT, ...(st && st.font || {})}; if (st) { if (st.fill) x.fill = {type: 'pattern', pattern: 'solid', fgColor: {argb: st.fill}}; if (st.align) x.alignment = st.align; if (st.border) x.border = st.border; if (st.fmt) x.numFmt = st.fmt; } return x; };
+  const head = (r, cols, h) => { cols.forEach(([col, t, to]) => { if (to) ws.mergeCells(r, col, r, to); cell(r, col, t, {font: {bold: true, color: {argb: 'FFFFFFFF'}}, fill: BR, align: {vertical: 'middle', horizontal: 'center', wrapText: true}, border: ALL}); if (to) for (let k = col + 1; k <= to; k++) ws.getCell(r, k).border = ALL; }); ws.getRow(r).height = h || 30; };
+  const section = (r, t) => { ws.mergeCells(r, 1, r, 7); cell(r, 1, t, {font: {bold: true, size: 11, color: {argb: BR}}}); ws.getRow(r).height = 20; };
+  const KM = '#,##0', L = '#,##0.00';
+  let r = 1;
+  ws.mergeCells(r, 1, r, 7); cell(r, 1, 'ТОО «ФМРус»', {font: {color: {argb: GR}}}); r++;
+  ws.mergeCells(r, 1, r, 7); cell(r, 1, 'Путевой лист легкового автомобиля', {font: {bold: true, size: 15, color: {argb: BR}}, align: {horizontal: 'center'}}); ws.getRow(r).height = 24; r++;
+  ws.mergeCells(r, 1, r, 7); cell(r, 1, 'за ' + MONTHS[mo - 1].toLowerCase() + ' ' + y + ' г.', {font: {size: 11}, align: {horizontal: 'center'}}); r += 2;
+  const kv = [['Водитель', d.name || '', 'Автомобиль', [d.car, d.plate ? 'гос. № ' + d.plate : ''].filter(Boolean).join(', ')], ['Принадлежность', KIND[d.kind] || 'личный', 'Топливо', [d.fuel, d.card ? 'карта № ' + d.card : ''].filter(Boolean).join(', ')]];
+  for (const [l1, v1, l2, v2] of kv) {
+    ws.mergeCells(r, 1, r, 2); ws.mergeCells(r, 5, r, 7);
+    const lab = {font: {color: {argb: GR}}, fill: 'FFF5F4F4', border: ALL}, val = {font: {bold: true}, border: ALL};
+    cell(r, 1, l1, lab); ws.getCell(r, 2).border = ALL; cell(r, 3, v1, val); cell(r, 4, l2, lab); cell(r, 5, v2, val); ws.getCell(r, 6).border = ALL; ws.getCell(r, 7).border = ALL; r++;
+  }
+  r++; section(r, 'Поездки'); r++;
+  head(r, [[1, '№'], [2, 'Дата'], [3, 'Маршрут'], [4, 'Цель поездки'], [5, 'Одометр при выезде, км'], [6, 'Одометр при возвращении, км'], [7, 'Пробег, км']]); r++;
+  const t0 = r;
+  trips.forEach((t, i) => {
+    const z = i % 2 ? 'FFFAF7F7' : null, ok = t.odoStart != null && t.odoEnd != null;
+    const st = (al, fmt) => ({border: ALL, fill: z, align: {vertical: 'top', horizontal: al, wrapText: true}, fmt});
+    cell(r, 1, i + 1, st('center')); cell(r, 2, dmy(t.date), st('center')); cell(r, 3, t.route || '', st('left')); cell(r, 4, t.purpose || '', st('left'));
+    cell(r, 5, t.odoStart ?? null, st('right', KM)); cell(r, 6, t.odoEnd ?? null, st('right', KM));
+    cell(r, 7, ok ? {formula: 'F' + r + '-E' + r, result: t.odoEnd - t.odoStart} : null, st('right', KM)); r++;
+  });
+  if (!trips.length) { ws.mergeCells(r, 1, r, 7); cell(r, 1, 'Поездок не было', {font: {color: {argb: GR}}, border: ALL}); r++; }
+  const kmRow = r, tot = {font: {bold: true}, fill: 'FFF3EDED', border: {...ALL, top: {style: 'medium', color: {argb: BR}}}};
+  ws.mergeCells(r, 1, r, 6); cell(r, 1, 'Итого пробег за месяц, км', tot); for (let k = 2; k <= 6; k++) ws.getCell(r, k).border = tot.border;
+  cell(r, 7, trips.length ? {formula: 'SUM(G' + t0 + ':G' + (r - 1) + ')', result: c.km} : 0, {...tot, fmt: KM, align: {horizontal: 'right'}}); r += 2;
+  section(r, 'Заправки по топливной карте'); r++;
+  head(r, [[1, '№'], [2, 'Дата'], [3, 'Примечание', 6], [7, 'Литры']], 20); r++;
+  const f0 = r;
+  fills.forEach((f, i) => {
+    const z = i % 2 ? 'FFFAF7F7' : null, st = (al, fmt) => ({border: ALL, fill: z, align: {horizontal: al}, fmt});
+    ws.mergeCells(r, 3, r, 6);
+    cell(r, 1, i + 1, st('center')); cell(r, 2, dmy(f.date), st('center')); cell(r, 3, f.note || '', st('left')); for (let k = 4; k <= 6; k++) ws.getCell(r, k).border = ALL;
+    cell(r, 7, f.liters ?? null, st('right', L)); r++;
+  });
+  if (!fills.length) { ws.mergeCells(r, 1, r, 7); cell(r, 1, 'Заправок не было', {font: {color: {argb: GR}}, border: ALL}); r++; }
+  const fuRow = r;
+  ws.mergeCells(r, 1, r, 6); cell(r, 1, 'Итого заправлено за месяц, л', tot); for (let k = 2; k <= 6; k++) ws.getCell(r, k).border = tot.border;
+  cell(r, 7, fills.length ? {formula: 'SUM(G' + f0 + ':G' + (r - 1) + ')', result: c.fueled} : 0, {...tot, fmt: L, align: {horizontal: 'right'}}); r += 2;
+  section(r, 'Движение топлива за месяц'); r++;
+  head(r, [[1, 'Остаток на начало, л', 2], [3, 'Заправлено, л'], [4, 'Пробег, км'], [5, 'Норма, л/100 км'], [6, 'Расход по норме, л'], [7, 'Остаток на конец, л']]); r++;
+  const m = r, vs = fmt => ({border: ALL, align: {horizontal: 'center'}, fmt, font: {bold: true}});
+  ws.mergeCells(r, 1, r, 2); ws.getCell(r, 2).border = ALL;
+  cell(r, 1, sh.fuelStart ?? null, vs(L)); cell(r, 3, {formula: 'G' + fuRow, result: c.fueled}, vs(L)); cell(r, 4, {formula: 'G' + kmRow, result: c.km}, vs(KM));
+  cell(r, 5, sh.norm ?? null, vs(L)); cell(r, 6, sh.norm == null ? null : {formula: 'ROUND(D' + m + '*E' + m + '/100,2)', result: c.byNorm}, vs(L));
+  cell(r, 7, (sh.norm == null || sh.fuelStart == null) ? null : {formula: 'A' + m + '+C' + m + '-F' + m, result: c.end}, {...vs(L), fill: 'FFF3EDED'});
+  ws.getRow(r).height = 20; r += 3;
+  /* подписи в одну строку: водитель · руководитель · бухгалтер */
+  const sg = [[1, 3, 'Водитель', d.name || ''], [4, 4, 'Руководитель', ''], [5, 7, 'Бухгалтер', '']];
+  for (const [c1, c2, role] of sg) { if (c2 > c1) ws.mergeCells(r, c1, r, c2); cell(r, c1, role, {font: {bold: true}, align: {horizontal: 'center'}}); }
+  r += 2;
+  for (const [c1, c2] of sg) { if (c2 > c1) ws.mergeCells(r, c1, r, c2); cell(r, c1, '______________________________', {align: {horizontal: 'center'}}); }
+  r++;
+  for (const [c1, c2, , who] of sg) { if (c2 > c1) ws.mergeCells(r, c1, r, c2); cell(r, c1, 'подпись / ' + (who || 'ФИО'), {font: {size: 8, color: {argb: GR}}, align: {horizontal: 'center'}}); }
+  ws.pageSetup = {orientation: 'landscape', paperSize: 9, fitToPage: true, fitToWidth: 1, fitToHeight: trips.length > 25 ? 0 : 1, margins: {left: .4, right: .4, top: .5, bottom: .5, header: .2, footer: .2}};
+  ws.headerFooter.oddFooter = '&LТОО «ФМРус» · путевой лист&RЛист &P из &N';
+  return new Blob([await wb.xlsx.writeBuffer()], {type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+}
+async function saveXlsx() {
+  let blob;
+  try { blob = await buildXlsx(S.sheet, driver()); } catch (e) { toast('Не удалось собрать Excel.'); return; }
+  offer(fileBase() + '.xlsx', blob);
 }
 
 /* ---------- запуск ---------- */
