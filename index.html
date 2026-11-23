@@ -737,6 +737,7 @@ function rebuild(c){
     else S[c]=S[c].filter(d=>TEAM.has(mgrOf(c,d))||(d._u===myUid&&!mgrOf(c,d)));
   }
   else if(c==='districts'&&!isAdm()){const ar=myArea(),me0=myReg&&myReg.manager;S.districts=S.districts.filter(d=>(ar&&d.region===ar)||mineDist(d)||(me0&&parseManagers(d.managerRaw||'').includes(me0)))}
+  if(c==='agro'&&!isAdm()&&!isAgro()){const me0=myReg&&myReg.manager;S.agro=S.agro.filter(d=>d._u===myUid||(me0&&mgrOf('agro',d)===me0))}
   if(!isAdm()||!viewAs)return;
   if(c==='districts'){const va={...AREA_DEF,...(ORG().area||{})}[viewAs]||'';S.districts=S.districts.filter(d=>parseManagers(d.managerRaw||'').includes(viewAs)||(va&&d.region===va))}
   else S[c]=S[c].filter(d=>mgrOf(c,d)===viewAs);
@@ -796,7 +797,8 @@ function ensureSubs(){
   SHARED.forEach(c=>sub(c,'shared'));
   const us=new Set([myUid]);if(isAdm()){REG.forEach(r=>us.add(r.id));if(ORG().ownerUid)us.add(ORG().ownerUid);(ORG().ownerUids||[]).forEach(u=>us.add(u))}
   us.forEach(u=>PERS.forEach(c=>sub(c,u)));
-  if(isTop())AGRO_UIDS.forEach(u=>sub('agro',u));
+  /* выезды агронома лежат в его кабинете: руководство видит все, глава — по своей команде, менеджер — по своим запросам */
+  if(!isAgro())AGRO_UIDS.forEach(u=>sub('agro',u));
   /* менеджер видит все хозяйства своих районов: подписываемся на карточки районов всех кабинетов (только чтение), журнал остаётся свой */
   if(!isAdm()){const du=new Set(REG.map(r=>r.id));if(ORG().ownerUid)du.add(ORG().ownerUid);(ORG().ownerUids||[]).forEach(u=>du.add(u));du.forEach(u=>{if(u!==myUid)sub('districts',u)})}
 }
