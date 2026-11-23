@@ -221,6 +221,8 @@ const SEASON_DEF={'Протравители':[60,40,0,0],'Гербициды':[1
 const gIco=g=>{const s=GRP_STYLE[g];return s?`<i class="gi" style="--gc:${s.c};--gi:url(${s.i})"></i>`:''};
 const gCol=g=>(GRP_STYLE[g]||{c:'#888780'}).c;
 const CAT_ORDER=Object.fromEntries(CATALOG_SRC.map((c,i)=>[c.k,i]));
+/* разбивка по кварталам пока скрыта: только общий план (вернуть — NOQ=false) */
+const NOQ=true;
 const QCOL=['#e8b4b6','#b5545a','#7C2529','#4a1518'];
 const STATUS={draft:['Черновик','warn'],review:['На согласовании','acc'],approved:['Утверждён','good']};
 const short=n=>{const p=n.split(' ');return p[0]+(p[1]?' '+p[1][0]+'.':'')};
@@ -290,17 +292,18 @@ function renderKpis(){
  $('#kpis').innerHTML=`
  <div class="panel kpi"><div class="l">План, ₸ с НДС</div><div class="v" data-k="s">${mln(t.s)}</div><div class="s" data-k="s2">${fmt(t.s)} ₸</div></div>
  <div class="panel kpi"><div class="l">Объём, л/кг</div><div class="v" data-k="l">${fmt(t.l)}</div><div class="s">${t.n} препаратов в плане</div></div>
- <div class="panel kpi"><div class="l">Цель от руководства</div><div class="v">${t.g?mln(t.g):'—'}</div><div class="s">${t.g?'сумма целей менеджеров':'цели задаются на вкладке «Цели и сезонность»'}</div></div>
+ <div class="panel kpi"><div class="l">Цель от руководства</div><div class="v">${t.g?mln(t.g):'—'}</div><div class="s">${t.g?'сумма целей менеджеров':(NOQ?'цели задаются на вкладке «Цели»':'цели задаются на вкладке «Цели и сезонность»')}</div></div>
  <div class="panel kpi"><div class="l">Собрано от цели</div><div class="v ${pc==null?'':pc>=100?'ok':'lo'}" data-k="pc">${pc==null?'—':pc+'%'}</div><div class="meter${pc>=100?' ok':''}"><i data-k="pm" style="width:${Math.min(pc||0,100)}%"></i></div></div>`;
 }
 function renderTabs(){
- const defs=[['matrix','По препаратам'],['quarters','По кварталам'],['goals','Цели и сезонность'],['catalog','Препараты и цены']];
+ const defs=NOQ?[['matrix','По препаратам'],['goals','Цели'],['catalog','Препараты и цены']]:[['matrix','По препаратам'],['quarters','По кварталам'],['goals','Цели и сезонность'],['catalog','Препараты и цены']];
  $('#tabs').innerHTML=defs.map(([id,n])=>`<button class="tab" role="tab" aria-selected="${tab===id}" data-tab="${id}">${n}</button>`).join('');
 }
 function render(){
  renderHeader();renderKpis();renderTabs();
  const v=$('#view');
  if(!ready){v.innerHTML='<div class="empty">Загружаю план…</div>';return}
+ if(NOQ&&tab==='quarters')tab='matrix';
  v.innerHTML=tab==='matrix'?vMatrix():tab==='quarters'?vQuarters():tab==='goals'?vGoals():vCatalog();
 }
 const gIdx=g=>{const i=GROUPS.indexOf(g);return i<0?99:i};
@@ -380,6 +383,7 @@ function vGoals(){
  let log='';
  if(!all){const L=(planOf(region).log||[]).slice().reverse();const A={review:'отправил(а) на согласование',approved:'утвердил(а)',draft:'вернул(а) в черновик'};
   log=`<div class="panel"><h3>История согласования</h3>${L.length?`<ul class="log">${L.map(x=>`<li>${new Date(x.at).toLocaleString('ru-RU',{dateStyle:'short',timeStyle:'short'})} · ${esc(names[x.by]||'Пользователь')} ${A[x.act]||x.act}${x.note?` — ${esc(x.note)}`:''}</li>`).join('')}</ul>`:'<p class="muted">Пока без движения.</p>'}</div>`}
+ if(NOQ)return `<div style="display:grid;gap:14px;max-width:760px">${goals}${log}</div>`;
  return `<div class="grid2"><div style="display:grid;gap:14px">${goals}${log}</div>${seas}</div>`;
 }
 
@@ -491,8 +495,9 @@ async function buildXlsx(){
  const MONEY='#,##0',PCT='0%';
  const wsv=wb.addWorksheet('Сводка',{properties:{tabColor:{argb:'FF2A7D46'}}});
  const ws=wb.addWorksheet('Матрица',{views:[{state:'frozen',xSplit:2,ySplit:5}],properties:{tabColor:{argb:BR}}});
- const wq=wb.addWorksheet('Кварталы',{views:[{state:'frozen',xSplit:1,ySplit:4}]});
- const wsS=wb.addWorksheet('Сезонность',{properties:{tabColor:{argb:'FFFF8F1C'}}});
+ const wq=NOQ?null:wb.addWorksheet('Кварталы',{views:[{state:'frozen',xSplit:1,ySplit:4}]});
+ const wsS=NOQ?null:wb.addWorksheet('Сезонность',{properties:{tabColor:{argb:'FFFF8F1C'}}});
+ const NQ=NOQ?0:4;
  title(ws,`План продаж на сезон ${season} по препаратам`,sub);
  const C0=7;/* A № B Препарат C Происх D Группа E ДВ F Ед G Цена */
  const fix=['№','Препарат','Происх.','Группа','Действующее вещество','Ед.','Цена, ₸ с НДС'];
@@ -500,7 +505,7 @@ async function buildXlsx(){
  M.forEach(({m,r},k)=>{const c1=C0+1+k*2;ws.mergeCells(4,c1,4,c1+1);const c=ws.getCell(4,c1);c.value=m+(region==='all'?' ('+regOf(r).name+')':'');head(c);head(ws.getCell(4,c1+1));const a=ws.getCell(5,c1),s=ws.getCell(5,c1+1);a.value='л/кг';s.value='₸';head(a);head(s)});
  const cTL=C0+1+M.length*2,cTS=cTL+1,cQ=cTS+1;
  ws.mergeCells(4,cTL,4,cTS);ws.getCell(4,cTL).value='Итого';head(ws.getCell(4,cTL));head(ws.getCell(4,cTS));ws.getCell(5,cTL).value='л/кг';ws.getCell(5,cTS).value='₸';head(ws.getCell(5,cTL));head(ws.getCell(5,cTS));
- ws.mergeCells(4,cQ,4,cQ+3);ws.getCell(4,cQ).value='Доля по кварталам (из листа «Сезонность»)';[0,1,2,3].forEach(k=>{head(ws.getCell(4,cQ+k));const c=ws.getCell(5,cQ+k);c.value=(k+1)+' кв';head(c)});
+ if(!NOQ){ws.mergeCells(4,cQ,4,cQ+3);ws.getCell(4,cQ).value='Доля по кварталам (из листа «Сезонность»)';[0,1,2,3].forEach(k=>{head(ws.getCell(4,cQ+k));const c=ws.getCell(5,cQ+k);c.value=(k+1)+' кв';head(c)})}
  const r0=6;
  items.forEach((p,i)=>{const R=r0+i,row=ws.getRow(R);
   row.getCell(1).value=i+1;row.getCell(2).value=p.name;row.getCell(3).value=p.origin||'';row.getCell(4).value=p.group;row.getCell(5).value=p.ai||'';row.getCell(6).value=p.unit;
@@ -508,19 +513,20 @@ async function buildXlsx(){
   M.forEach(({m,r},k)=>{const c1=C0+1+k*2;const q=row.getCell(c1);q.value=lit(r,p.id,m)||null;q.numFmt=MONEY;inp(q);const s=row.getCell(c1+1);s.value={formula:`${colL(c1)}${R}*$G${R}`};s.numFmt=MONEY});
   row.getCell(cTL).value={formula:M.map((_,k)=>colL(C0+1+k*2)+R).join('+')||'0'};row.getCell(cTL).numFmt=MONEY;
   row.getCell(cTS).value={formula:`${colL(cTL)}${R}*$G${R}`};row.getCell(cTS).numFmt=MONEY;
-  [0,1,2,3].forEach(k=>{const c=row.getCell(cQ+k);c.value={formula:`IFERROR(VLOOKUP($D${R},'Сезонность'!$A$5:$E$${4+GROUPS.length},${k+2},FALSE)/100,0)`};c.numFmt=PCT;c.font={color:{argb:'FF63666A'},name:'Arial',size:9}});
-  for(let c=1;c<=cQ+3;c++)box(row.getCell(c));
+  if(!NOQ)[0,1,2,3].forEach(k=>{const c=row.getCell(cQ+k);c.value={formula:`IFERROR(VLOOKUP($D${R},'Сезонность'!$A$5:$E$${4+GROUPS.length},${k+2},FALSE)/100,0)`};c.numFmt=PCT;c.font={color:{argb:'FF63666A'},name:'Arial',size:9}});
+  for(let c=1;c<=cQ+NQ-1;c++)box(row.getCell(c));
   row.getCell(5).font={name:'Arial',size:9,color:{argb:'FF63666A'}};
  });
  const RT=r0+items.length,rl=r0,rh=RT-1;
  const tr=ws.getRow(RT);tr.getCell(2).value='Итого';
  for(let c=C0+1;c<=cTS;c++){tr.getCell(c).value={formula:`SUM(${colL(c)}${rl}:${colL(c)}${rh})`};tr.getCell(c).numFmt=MONEY}
- for(let c=1;c<=cQ+3;c++)tot(tr.getCell(c));
+ for(let c=1;c<=cQ+NQ-1;c++)tot(tr.getCell(c));
  ws.getColumn(1).width=5;ws.getColumn(2).width=24;ws.getColumn(3).width=8;ws.getColumn(4).width=20;ws.getColumn(5).width=34;ws.getColumn(6).width=5;ws.getColumn(7).width=12;
- for(let c=C0+1;c<=cTS;c++)ws.getColumn(c).width=(c-C0)%2?10:14;for(let k=0;k<4;k++)ws.getColumn(cQ+k).width=7;
+ for(let c=C0+1;c<=cTS;c++)ws.getColumn(c).width=(c-C0)%2?10:14;for(let k=0;k<NQ;k++)ws.getColumn(cQ+k).width=7;
  ws.getRow(4).height=32;
  ws.pageSetup={orientation:'landscape',paperSize:9,fitToPage:true,fitToWidth:1,fitToHeight:0,printTitlesRow:'4:5',margins:{left:.3,right:.3,top:.4,bottom:.4,header:.2,footer:.2}};
  ws.headerFooter.oddFooter='&LТОО ФМРус · план продаж '+season+'&RЛист &P из &N';
+ if(!NOQ){
  /* Сезонность — содержимое */
  title(wsS,'Сезонность продаж по группам препаратов','Доля годового плана группы, приходящаяся на квартал, %. Сумма по строке — 100%.');
  ['Группа','1 кв, %','2 кв, %','3 кв, %','4 кв, %','Сумма'].forEach((t,i)=>{const c=wsS.getCell(4,i+1);c.value=t;head(c)});
@@ -550,19 +556,20 @@ async function buildXlsx(){
  wq.getCell(`A${QT+2}`).value='Недобор квартала переносится в план следующего: план с переносом = план квартала + (план с переносом предыдущего − факт предыдущего). Пока факт не вписан, берётся план квартала.';
  wq.getCell(`A${QT+2}`).font={size:9,color:{argb:'FF63666A'},name:'Arial'};
  wq.pageSetup={orientation:'landscape',paperSize:9,fitToPage:true,fitToWidth:1,fitToHeight:0};
+ }
  /* Сводка — первым листом */
  title(wsv,`План продаж на сезон ${season} — ${regTitle()}`,sub);
- ['Менеджер','Область','Цель, ₸','План, ₸','% цели','Объём, л/кг','1 кв, ₸','2 кв, ₸','3 кв, ₸','4 кв, ₸'].forEach((t,i)=>{const c=wsv.getCell(4,i+1);c.value=t;head(c)});wsv.getRow(4).height=30;
+ ['Менеджер','Область','Цель, ₸','План, ₸','% цели','Объём, л/кг'].concat(NOQ?[]:['1 кв, ₸','2 кв, ₸','3 кв, ₸','4 кв, ₸']).forEach((t,i)=>{const c=wsv.getCell(4,i+1);c.value=t;head(c)});wsv.getRow(4).height=30;
  M.forEach(({m,r},k)=>{const R=5+k,row=wsv.getRow(R);row.getCell(1).value=m;row.getCell(2).value=regOf(r).name;
   const g=row.getCell(3);g.value=+(planOf(r).goals[m])||null;inp(g);
   row.getCell(4).value={formula:`'Матрица'!${colL(C0+2+k*2)}${RT}`};row.getCell(5).value={formula:`IF(C${R}>0,D${R}/C${R},"")`};
   row.getCell(6).value={formula:`'Матрица'!${colL(C0+1+k*2)}${RT}`};
-  [0,1,2,3].forEach(q=>row.getCell(7+q).value={formula:`'Кварталы'!${colL(3+q)}${5+k}`});
-  for(let c=1;c<=10;c++){box(row.getCell(c));if(c>2)row.getCell(c).numFmt=c===5?PCT:MONEY}});
+  if(!NOQ)[0,1,2,3].forEach(q=>row.getCell(7+q).value={formula:`'Кварталы'!${colL(3+q)}${5+k}`});
+  for(let c=1;c<=6+NQ;c++){box(row.getCell(c));if(c>2)row.getCell(c).numFmt=c===5?PCT:MONEY}});
  const ST=5+M.length,st=wsv.getRow(ST);st.getCell(1).value='Итого';
- [3,4,6,7,8,9,10].forEach(c=>{st.getCell(c).value={formula:`SUM(${colL(c)}5:${colL(c)}${ST-1})`};st.getCell(c).numFmt=MONEY});
- st.getCell(5).value={formula:`IF(C${ST}>0,SUMIF(C5:C${ST-1},">0",D5:D${ST-1})/C${ST},"")`};st.getCell(5).numFmt=PCT;for(let c=1;c<=10;c++)tot(st.getCell(c));
- wsv.getColumn(1).width=26;wsv.getColumn(2).width=14;for(let c=3;c<=10;c++)wsv.getColumn(c).width=c===5?9:15;
+ (NOQ?[3,4,6]:[3,4,6,7,8,9,10]).forEach(c=>{st.getCell(c).value={formula:`SUM(${colL(c)}5:${colL(c)}${ST-1})`};st.getCell(c).numFmt=MONEY});
+ st.getCell(5).value={formula:`IF(C${ST}>0,SUMIF(C5:C${ST-1},">0",D5:D${ST-1})/C${ST},"")`};st.getCell(5).numFmt=PCT;for(let c=1;c<=6+NQ;c++)tot(st.getCell(c));
+ wsv.getColumn(1).width=26;wsv.getColumn(2).width=14;for(let c=3;c<=6+NQ;c++)wsv.getColumn(c).width=c===5?9:15;
  const sg=ST+3;[['Составил:','____________________'],['Согласовано:','____________________'],['Утверждаю, директор:','____________________']].forEach(([a,b],i)=>{wsv.getCell(sg+i*2,1).value=a;wsv.getCell(sg+i*2,3).value=b;wsv.getCell(sg+i*2,1).font={name:'Arial',size:10}});
  wsv.getCell(sg+7,1).value='Цены, литры, цели и факт в жёлтых ячейках можно менять: остальное пересчитается по формулам.';wsv.getCell(sg+7,1).font={size:9,italic:true,color:{argb:'FF63666A'},name:'Arial'};
  wsv.pageSetup={orientation:'landscape',paperSize:9,fitToPage:true,fitToWidth:1,fitToHeight:1};
@@ -592,14 +599,14 @@ function pdfPages(){
  /* стр. 1: сводка */
  const tot4=[0,0,0,0];
  const rows=M.map(({m,r})=>{const x=mgrTot(r,m),g=+(planOf(r).goals[m])||0,q=mgrQ(r,m);q.forEach((v,k)=>tot4[k]+=v);const pc=g?Math.round(x.s/g*100)+'%':'—';
-  return `<tr><td>${esc(m)}${region==='all'?` <span style="color:#63666A">· ${regOf(r).name}</span>`:''}</td><td>${g?fmt(g):'—'}</td><td><b>${fmt(x.s)}</b></td><td>${pc}</td><td>${fmt(x.l)}</td>${q.map(v=>`<td>${v?fmt(v):'—'}</td>`).join('')}</tr>`}).join('');
+  return `<tr><td>${esc(m)}${region==='all'?` <span style="color:#63666A">· ${regOf(r).name}</span>`:''}</td><td>${g?fmt(g):'—'}</td><td><b>${fmt(x.s)}</b></td><td>${pc}</td><td>${fmt(x.l)}</td>${NOQ?'':q.map(v=>`<td>${v?fmt(v):'—'}</td>`).join('')}</tr>`}).join('');
  const T=tot4.reduce((a,b)=>a+b,0);
  const kp=(l,v,s)=>`<div style="flex:1;background:#f5f4f4;border-radius:8px;padding:10px 14px"><div style="font-size:11px;color:#63666A">${l}</div><div style="font-size:22px;font-weight:600">${v}</div><div style="font-size:10px;color:#63666A">${s}</div></div>`;
  pages.push(`<div class="pg">${ph('Сводка по менеджерам')}
  <div style="display:flex;gap:12px;margin-bottom:16px">${kp('План, ₸ с НДС',mln(t.s),fmt(t.s)+' ₸')}${kp('Объём, л/кг',fmt(t.l),t.n+' препаратов')}${kp('Цель',t.g?mln(t.g):'—','сумма целей менеджеров')}${kp('Собрано от цели',t.g?Math.round(t.sg/t.g*100)+'%':'—',t.g?'по менеджерам с целью':'')}</div>
- <table><thead><tr><th>Менеджер</th><th>Цель, ₸</th><th>План, ₸</th><th>% цели</th><th>Объём, л/кг</th><th>1 кв, ₸</th><th>2 кв, ₸</th><th>3 кв, ₸</th><th>4 кв, ₸</th></tr></thead><tbody>${rows}
- <tr class="tot"><td>Итого</td><td>${t.g?fmt(t.g):'—'}</td><td>${fmt(t.s)}</td><td>${t.g?Math.round(t.sg/t.g*100)+'%':'—'}</td><td>${fmt(t.l)}</td>${tot4.map(v=>`<td>${fmt(v)}</td>`).join('')}</tr></tbody></table>
- ${T?`<div style="display:flex;height:24px;border-radius:5px;overflow:hidden;margin-top:16px;font-size:11px;font-weight:600">${tot4.map((x,k)=>x?`<div style="width:${x/T*100}%;background:${QCOL[k]};color:${k?'#fff':'#4a1518'};display:flex;align-items:center;padding-left:8px;white-space:nowrap;overflow:hidden">${k+1} кв · ${Math.round(x/T*100)}%</div>`:'').join('')}</div>`:''}
+ <table><thead><tr><th>Менеджер</th><th>Цель, ₸</th><th>План, ₸</th><th>% цели</th><th>Объём, л/кг</th>${NOQ?'':'<th>1 кв, ₸</th><th>2 кв, ₸</th><th>3 кв, ₸</th><th>4 кв, ₸</th>'}</tr></thead><tbody>${rows}
+ <tr class="tot"><td>Итого</td><td>${t.g?fmt(t.g):'—'}</td><td>${fmt(t.s)}</td><td>${t.g?Math.round(t.sg/t.g*100)+'%':'—'}</td><td>${fmt(t.l)}</td>${NOQ?'':tot4.map(v=>`<td>${fmt(v)}</td>`).join('')}</tr></tbody></table>
+ ${T&&!NOQ?`<div style="display:flex;height:24px;border-radius:5px;overflow:hidden;margin-top:16px;font-size:11px;font-weight:600">${tot4.map((x,k)=>x?`<div style="width:${x/T*100}%;background:${QCOL[k]};color:${k?'#fff':'#4a1518'};display:flex;align-items:center;padding-left:8px;white-space:nowrap;overflow:hidden">${k+1} кв · ${Math.round(x/T*100)}%</div>`:'').join('')}</div>`:''}
  <div style="display:flex;gap:40px;margin-top:34px;font-size:12px"><div>Составил: ______________________</div><div>Согласовано: ______________________</div><div>Утверждаю, директор: ______________________</div></div>${ft()}</div>`);
  /* матрица: только препараты с планом */
  const items=sortedCat().filter(p=>prodTot(p.id));
