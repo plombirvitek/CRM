@@ -198,7 +198,8 @@ input.bad{border-color:var(--bad);background:var(--bad-soft)}
 .sec-h{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--line)}
 .sec-h .sum{color:var(--muted);font-variant-numeric:tabular-nums}
 .hd,.r{display:grid;gap:8px;align-items:center;padding:8px 14px}
-.trips .hd,.trips .r{grid-template-columns:136px minmax(150px,1.5fr) minmax(130px,1fr) 108px 108px 70px 32px}
+.trips .hd,.trips .r{grid-template-columns:122px minmax(84px,.7fr) minmax(84px,.7fr) minmax(84px,.7fr) minmax(200px,2.6fr) 80px 80px 52px 32px}
+.trips .r input[type=date]{padding-inline:6px}
 .fills .hd,.fills .r{grid-template-columns:136px 100px minmax(130px,1fr) 32px}
 .hd{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600;border-bottom:1px solid var(--line);align-items:end}
 .hd .ra{text-align:right}
@@ -222,9 +223,9 @@ input.bad{border-color:var(--bad);background:var(--bad-soft)}
   .carinfo{grid-column:1/-1}
   .hd{display:none}
   .c .l{display:block;font-size:11px;color:var(--muted);margin-bottom:2px}
-  .trips .r{grid-template-columns:1fr 1fr 34px;grid-template-areas:"date date date" "route route route" "purp purp purp" "o1 o2 o2" "km km x";padding-block:12px}
+  .trips .r{grid-template-columns:1fr 1fr 34px;grid-template-areas:"date date date" "from from from" "via via via" "to to to" "purp purp purp" "o1 o2 o2" "km km x";padding-block:12px}
   .fills .r{grid-template-columns:1fr 1fr 34px;grid-template-areas:"date lit lit" "note note x";padding-block:12px}
-  .c-date{grid-area:date}.c-route{grid-area:route}.c-purp{grid-area:purp}.c-o1{grid-area:o1}.c-o2{grid-area:o2}
+  .c-date{grid-area:date}.c-from{grid-area:from}.c-via{grid-area:via}.c-to{grid-area:to}.c-purp{grid-area:purp}.c-o1{grid-area:o1}.c-o2{grid-area:o2}
   .c-km{grid-area:km;text-align:left}.c-x{grid-area:x;align-self:end}
   .c-lit{grid-area:lit}.c-note{grid-area:note}
   .c input.num{text-align:left}
@@ -326,6 +327,16 @@ function banner(text) { const b = $('#banner'); b.textContent = text || ''; b.hi
 
 /* ---------- расчёт (чистые функции) ---------- */
 const cmpDate = (a, b) => (a.date || '9999').localeCompare(b.date || '9999') || ((a.odoStart ?? 1e12) - (b.odoStart ?? 1e12));
+/* маршрут: пункт отправления, промежуточный пункт(ы), пункт назначения; route — собранная строка для печати и проверок */
+function routeFix(t) {
+  if (t.from == null && t.via == null && t.to == null) {
+    const p = String(t.route || '').split(/\s*(?:,|→|->|—|-(?=\s))\s*/).map(x => x.trim()).filter(Boolean);
+    t.from = p[0] || ''; t.to = p.length > 1 ? p[p.length - 1] : ''; t.via = p.slice(1, -1).join(', ');
+  }
+  t.from = t.from || ''; t.via = t.via || ''; t.to = t.to || '';
+  t.route = [t.from, t.via, t.to].filter(x => String(x).trim()).join(' → ');
+  return t;
+}
 function calc(sh) {
   let km = 0, fueled = 0;
   for (const t of sh.trips) if (t.odoStart != null && t.odoEnd != null && t.odoEnd >= t.odoStart) km += t.odoEnd - t.odoStart;
@@ -342,7 +353,8 @@ function analyse(sh, driver) {
   for (const t of [...sh.trips].sort(cmpDate)) {
     const r = rows[t.id] = {errs: [], warns: [], bad: new Set(), miss: new Set(), km: null};
     if (!t.date) r.miss.add('date'); else if (t.date < a || t.date > b) { r.bad.add('date'); r.errs.push('Дата не из этого месяца'); }
-    if (!String(t.route || '').trim()) r.miss.add('route');
+    if (!String(t.from || '').trim()) r.miss.add('from');
+    if (!String(t.to || '').trim()) r.miss.add('to');
     if (t.odoStart == null) r.miss.add('odoStart');
     if (t.odoEnd == null) r.miss.add('odoEnd');
     if (t.odoStart != null && t.odoEnd != null) {
@@ -387,7 +399,7 @@ function normSheet(d, driverId, month) {
     norm: num(d.norm), fuelStart: num(d.fuelStart),
     status: ['draft', 'submitted', 'approved'].includes(d.status) ? d.status : 'draft',
     submittedAt: d.submittedAt || null,
-    trips: (Array.isArray(d.trips) ? d.trips : []).map(t => ({id: String(t.id || uid()), date: t.date || '', route: t.route || '', purpose: t.purpose || '', odoStart: num(t.odoStart), odoEnd: num(t.odoEnd)})),
+    trips: (Array.isArray(d.trips) ? d.trips : []).map(t => routeFix({id: String(t.id || uid()), date: t.date || '', route: t.route || '', from: t.from, via: t.via, to: t.to, purpose: t.purpose || '', odoStart: num(t.odoStart), odoEnd: num(t.odoEnd)})),
     fills: (Array.isArray(d.fills) ? d.fills : []).map(f => ({id: String(f.id || uid()), date: f.date || '', liters: num(f.liters), note: f.note || ''}))
   };
 }
@@ -506,7 +518,7 @@ function renderSheet() {
     '<section class="panel issues" id="issues" hidden></section>' +
     '<section class="panel" id="car"></section>' +
     '<section class="panel trips"><div class="sec-h"><h2>Поездки</h2><span class="sum" id="tripSum"></span></div>' +
-      '<div class="hd"><span>Дата</span><span>Маршрут</span><span>Цель поездки</span><span class="ra">Одометр при выезде</span><span class="ra">Одометр при возвращении</span><span class="ra">Пробег, км</span><span></span></div>' +
+      '<div class="hd"><span>Дата</span><span>Откуда</span><span>Через</span><span>Куда</span><span>Цель поездки</span><span class="ra">Одометр, выезд</span><span class="ra">Одометр, возврат</span><span class="ra">Км</span><span></span></div>' +
       '<div id="trips"></div>' + (lk ? '' : '<div class="foot"><button type="button" class="btn" data-act="addTrip">+ Поездка</button></div>') + '</section>' +
     '<section class="panel fills"><div class="sec-h"><h2>Заправки по топливной карте</h2><span class="sum" id="fillSum"></span></div>' +
       '<div class="hd"><span>Дата</span><span class="ra">Литры</span><span>Примечание</span><span></span></div>' +
@@ -542,7 +554,7 @@ function tripRow(t) {
   const dis = locked() ? ' disabled' : '', [a, b] = bounds(S.month), id = esc(t.id);
   return '<div class="r" data-id="' + id + '" data-kind="trips">' +
     '<label class="c c-date" for="t-' + id + '-date"><span class="l">Дата</span><input type="date" id="t-' + id + '-date" data-f="date" min="' + a + '" max="' + b + '" value="' + esc(t.date) + '"' + dis + '></label>' +
-    '<label class="c c-route" for="t-' + id + '-route"><span class="l">Маршрут</span><input type="text" id="t-' + id + '-route" data-f="route" placeholder="Откуда → куда → обратно" value="' + esc(t.route) + '"' + dis + '></label>' +
+    [['from', 'Откуда', 'Откуда'], ['via', 'Через', '—'], ['to', 'Куда', 'Куда']].map(([k, l, ph]) => '<label class="c c-' + k + '" for="t-' + id + '-' + k + '"><span class="l">' + l + '</span><input type="text" id="t-' + id + '-' + k + '" data-f="' + k + '" placeholder="' + ph + '" value="' + esc(t[k] || '') + '"' + dis + '></label>').join('') +
     '<label class="c c-purp" for="t-' + id + '-purp"><span class="l">Цель поездки</span><input type="text" id="t-' + id + '-purp" data-f="purpose" placeholder="Хозяйство, зачем ездил" value="' + esc(t.purpose) + '"' + dis + '></label>' +
     '<label class="c c-o1" for="t-' + id + '-o1"><span class="l">Одометр при выезде</span><input type="text" class="num" inputmode="numeric" autocomplete="off" id="t-' + id + '-o1" data-f="odoStart" value="' + (t.odoStart ?? '') + '"' + dis + '></label>' +
     '<label class="c c-o2" for="t-' + id + '-o2"><span class="l">Одометр при возвращении</span><input type="text" class="num" inputmode="numeric" autocomplete="off" id="t-' + id + '-o2" data-f="odoEnd" value="' + (t.odoEnd ?? '') + '"' + dis + '></label>' +
@@ -594,11 +606,11 @@ function kpi(t, v, u, s, alert) { return '<div class="panel kpi' + (alert ? ' al
 function addTrip() {
   const sh = S.sheet, d = driver(), [a, b] = bounds(S.month), td = todayStr();
   const last = [...sh.trips].sort(cmpDate).pop();
-  const t = {id: uid(), date: (td >= a && td <= b) ? td : (last && last.date) || a, route: '', purpose: '',
+  const t = {id: uid(), date: (td >= a && td <= b) ? td : (last && last.date) || a, route: '', from: '', via: '', to: '', purpose: '',
     odoStart: (d && d.kind === 'company' && last && last.odoEnd != null) ? last.odoEnd : null, odoEnd: null};
   sh.trips.push(t); touch();
   if (sh.trips.length === 1) renderTrips(); else $('#trips').insertAdjacentHTML('beforeend', tripRow(t));
-  recalc(); const f = document.getElementById('t-' + t.id + '-route'); if (f) f.focus();
+  recalc(); const f = document.getElementById('t-' + t.id + '-from'); if (f) f.focus();
 }
 function addFill() {
   const sh = S.sheet, [a, b] = bounds(S.month), td = todayStr();
@@ -622,6 +634,7 @@ document.addEventListener('input', e => {
   const item = S.sheet[row.dataset.kind].find(x => x.id === row.dataset.id); if (!item) return;
   const f = inp.dataset.f;
   item[f] = (f === 'odoStart' || f === 'odoEnd') ? (num(inp.value) == null ? null : Math.round(num(inp.value))) : f === 'liters' ? num(inp.value) : inp.value;
+  if (f === 'from' || f === 'via' || f === 'to') routeFix(item);
   touch(); recalc();
 });
 document.addEventListener('click', e => {
