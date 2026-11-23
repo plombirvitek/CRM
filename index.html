@@ -834,7 +834,7 @@ async function init(){
   try{mcp=await window.claude?.use?.('mcp')}catch(e){mcp=null}
   let user=null;try{user=await window.claude?.use?.('user')}catch(e){}
   if(user){try{myUid=(await user.id())||'';MAPB=MAPB_UIDS.includes(myUid);isOwner=!!(await user.isOwner())}catch(e){}}
-  {const pl=document.getElementById('planLink');if(pl)pl.hidden=!isOwner;const wl=document.getElementById('wbLink');if(wl)wl.hidden=!isOwner}
+  {const pl=document.getElementById('planLink');if(pl)pl.hidden=!isOwner;const wl=document.getElementById('wbLink');if(wl)wl.hidden=false}
   if(isOwner)me=ls('crm_me')||'';
   if(!db||!myUid){ready=true;$('#banner').innerHTML='<div class="banner">Личный кабинет недоступен. Откройте страницу по ссылке из своего аккаунта Claude: иначе данные не сохранятся.</div>';render();return}
   ensureSubs();

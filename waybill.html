@@ -40,7 +40,7 @@ async function ensureLogin(){
     if(!sess){if(document.body)await loginUI();else await new Promise(r=>addEventListener('DOMContentLoaded',r)).then(loginUI)}
     const r=await rest('profiles?user_id=eq.'+sess.uid+'&select=old_uid,name,is_admin');const a=await r.json();
     if(!a.length)throw new Error('Нет профиля');prof=a[0];
-    if(!prof.is_admin){document.body.innerHTML='<div style="max-width:420px;margin:80px auto;font:16px -apple-system,sans-serif;text-align:center"><b>Нет доступа</b><p>Путевые листы пока доступны только руководству.</p><p><a href="./">Вернуться в CRM</a></p></div>';throw new Error('no access')}
+    window.WB_ADMIN=!!prof.is_admin;window.WB_ME=prof.old_uid;document.documentElement.classList.toggle('wb-mgr',!prof.is_admin);
   })();
   return loginP;
 }
@@ -107,6 +107,7 @@ window.__sbLogout=()=>{lsSet(SK,null);location.reload()};
 <title>Путевой лист ФМРус</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&display=swap">
 <style>
+html.wb-mgr #driverEdit,html.wb-mgr #driverAdd{display:none!important}
 /* Layout: одна рабочая колонка. Сверху водитель и месяц, затем итоги месяца, карточка машины, поездки и заправки; печатная форма и карточка водителя открываются поверх. Токены взяты из CRM ФМРус. */
 :root{
   --bg:#f5f4f4; --surface:#ffffff; --surface2:#eeeded; --ink:#262127; --muted:#63666A; --line:#dedddd;
@@ -392,6 +393,7 @@ let saveTimer = null, saveChain = Promise.resolve(), loadTimer = null;
 const driver = () => S.drivers.find(d => d.id === S.driverId) || null;
 const sheetKey = () => S.driverId + '_' + S.month;
 const locked = () => !S.sheet || S.sheet.status !== 'draft';
+const isAdm = () => !!window.WB_ADMIN;
 
 function normSheet(d, driverId, month) {
   return {
@@ -410,13 +412,15 @@ function startDrivers() {
   loadTimer = setTimeout(() => banner('Данные пока не загрузились. Проверьте связь, страница продолжит попытки сама.'), 10000);
   S.db.collection('drivers').onSnapshot(snap => {
     clearTimeout(loadTimer); if (!S.saveErr) banner('');
-    S.drivers = snap.docs.map(d => Object.assign({id: d.id}, d.data()));
+    S.drivers = snap.docs.map(d => Object.assign({id: d.id}, d.data())).filter(d => isAdm() || d.uid === window.WB_ME);
     S.driversLoaded = true; onDrivers();
   }, e => { clearTimeout(loadTimer); S.driversLoaded = true; banner('Не удалось открыть данные: ' + (e && e.code || 'ошибка') + '. Изменения не сохранятся.'); S.db = null; onDrivers(); });
 }
 function onDrivers() {
   S.drivers.sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'ru'));
   const sel = $('#driverSel');
+  if (!isAdm()) sel.disabled = S.drivers.length < 2;
+  if (!isAdm() && !S.drivers.length) banner('Путевой лист для вас ещё не заведён. Обратитесь к руководителю.');
   sel.innerHTML = S.drivers.map(d => '<option value="' + esc(d.id) + '">' + esc(d.name || 'Без имени') + (d.plate ? ' · ' + esc(d.plate) : '') + '</option>').join('') || '<option value="">Водителей пока нет</option>';
   let want = S.driverId;
   if (!want || !S.drivers.some(d => d.id === want)) {
@@ -535,6 +539,7 @@ function renderBar() {
   st.textContent = map[sh.status][0]; st.className = 'chip ' + map[sh.status][1];
   let h = '<button type="button" class="btn" data-act="doc">Печатная форма</button>';
   if (sh.status === 'draft') h += '<button type="button" class="btn pri" data-act="submit">Сдать лист</button>';
+  else if (!isAdm()) h += '<span class="note">' + (sh.status === 'submitted' ? 'Лист сдан и ждёт проверки руководителем' : 'Лист принят') + '</span>';
   else if (sh.status === 'submitted') h += '<button type="button" class="btn" data-act="reopen">Вернуть на доработку</button><button type="button" class="btn pri" data-act="approve">Принять</button>';
   else h += '<button type="button" class="btn" data-act="reopen">Открыть для правок</button>';
   act.innerHTML = h; setSaveState();
@@ -547,8 +552,8 @@ function renderCar() {
     (d.plate ? ' <span class="plate">' + esc(d.plate) + '</span>' : '') +
     ' <span class="chip ' + (d.kind === 'company' ? 'acc' : '') + '">' + (KIND[d.kind] || 'личный') + '</span>' + (d.demo ? ' <span class="chip warn">пример</span>' : '') + '</div>' +
     '<div class="carsub">' + sub + '</div></div>' +
-    '<label class="fld" for="norm"><span>Норма расхода, л/100 км' + (normFor(d, S.month) != null ? ' (' + (isSummer(S.month) ? 'летняя' : 'зимняя') + ')' : '') + '</span><input id="norm" class="num" inputmode="decimal" autocomplete="off" value="' + (sh.norm ?? '') + '" placeholder="внесём позже"' + dis + '><em></em></label>' +
-    '<label class="fld" for="fuelStart"><span>Остаток на начало месяца, л</span><input id="fuelStart" class="num" inputmode="decimal" autocomplete="off" value="' + (sh.fuelStart ?? '') + '"' + dis + '><em>' + (S.carried ? 'перенесён из прошлого месяца' : '') + '</em></label></div>';
+    '<label class="fld" for="norm"><span>Норма расхода, л/100 км' + (normFor(d, S.month) != null ? ' (' + (isSummer(S.month) ? 'летняя' : 'зимняя') + ')' : '') + '</span><input id="norm" class="num" inputmode="decimal" autocomplete="off" value="' + (sh.norm ?? '') + '" placeholder="внесём позже"' + (isAdm() ? dis : ' disabled title="Норму расхода задаёт руководитель"') + '><em></em></label>' +
+    '<label class="fld" for="fuelStart"><span>Остаток на начало месяца, л</span><input id="fuelStart" class="num" inputmode="decimal" autocomplete="off" value="' + (sh.fuelStart ?? '') + '"' + (isAdm() ? dis : ' disabled title="Остаток переносится из прошлого месяца"') + '><em>' + (S.carried ? 'перенесён из прошлого месяца' : '') + '</em></label></div>';
 }
 function tripRow(t) {
   const dis = locked() ? ' disabled' : '', [a, b] = bounds(S.month), id = esc(t.id);
@@ -640,7 +645,7 @@ document.addEventListener('input', e => {
 document.addEventListener('click', e => {
   const b = e.target.closest && e.target.closest('[data-act]'); if (!b) return;
   const act = b.dataset.act;
-  if (act === 'addDriver') return driverForm(null);
+  if (act === 'addDriver') return isAdm() ? driverForm(null) : undefined;
   if (act === 'close') return closeModal();
   if (!S.sheet) return;
   if (act === 'addTrip') return addTrip();
@@ -656,6 +661,7 @@ document.addEventListener('click', e => {
     if (A.errors || A.missing) { S.showMissing = true; recalc(); toast('Лист не сдан: исправьте отмеченные поля.'); $('#issues').scrollIntoView({block: 'center'}); return; }
     setStatus('submitted'); toast('Лист сдан на проверку.'); return;
   }
+  if ((act === 'approve' || act === 'reopen') && !isAdm()) return;
   if (act === 'approve') { setStatus('approved'); toast('Лист принят.'); return; }
   if (act === 'reopen') { setStatus('draft'); toast('Лист открыт для правок.'); return; }
   if (act === 'doc') return showDoc();
@@ -663,8 +669,8 @@ document.addEventListener('click', e => {
   if (act === 'html') return saveHtml();
 });
 $('#driverSel').addEventListener('change', e => { S.driverId = e.target.value || null; $('#driverEdit').disabled = !S.driverId; openSheet(); });
-$('#driverEdit').addEventListener('click', () => { const d = driver(); if (d) driverForm(d); });
-$('#driverAdd').addEventListener('click', () => driverForm(null));
+$('#driverEdit').addEventListener('click', () => { const d = driver(); if (d && isAdm()) driverForm(d); });
+$('#driverAdd').addEventListener('click', () => { if (isAdm()) driverForm(null); });
 $('#mPrev').addEventListener('click', () => { S.month = shiftMonth(S.month, -1); openSheet(); });
 $('#mNext').addEventListener('click', () => { S.month = shiftMonth(S.month, 1); openSheet(); });
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#modal').hidden) closeModal(); });
