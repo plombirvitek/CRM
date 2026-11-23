@@ -93,7 +93,7 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden&&sess)list
 const db={collection:collRef};
 const user={async id(){await ensureLogin();return prof.old_uid},async isOwner(){await ensureLogin();return !!prof.is_admin},
   async profiles(ids){await ensureLogin();const r=await rest('profiles?select=old_uid,name');const a=await r.json();const m={};a.forEach(x=>m[x.old_uid]=x.name);return Object.fromEntries(ids.map(i=>[i,{id:i,name:m[i]||''}]))}};
-const downloads={async save({filename,data}){const a=document.createElement('a');a.href=URL.createObjectURL(data);a.download=filename;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},2000)}};
+const downloads={async save({filename,data}){if(!(data instanceof Blob)){const x=(filename.split('.').pop()||'').toLowerCase();data=new Blob([data],{type:x==='html'?'text/html;charset=utf-8':x==='xlsx'?'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':x==='pdf'?'application/pdf':x==='csv'?'text/csv;charset=utf-8':'application/octet-stream'})}const a=document.createElement('a');a.href=URL.createObjectURL(data);a.download=filename;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},2000)}};
 window.claude={use:async n=>{if(n==='db'){await ensureLogin();return db}if(n==='user'){await ensureLogin();return user}if(n==='downloads')return downloads;return null}};
 window.__sbLogout=()=>{lsSet(SK,null);location.reload()};
 })();
