@@ -441,7 +441,7 @@ async function openSheet() {
   await saveNow();
   if (S.unsub) { try { S.unsub(); } catch (e) {} S.unsub = null; }
   const token = ++S.token;
-  S.sheet = null; S.sheetLoaded = false; S.exists = false; S.carried = false; S.showMissing = false; S.dirty = false;
+  S.sheet = null; S.sheetLoaded = false; S.exists = false; S.carried = false; S.hasPrev = null; S.showMissing = false; S.dirty = false;
   $('#mLabel').textContent = monthLabel(S.month);
   renderSheet();
   if (!S.driverId) return;
@@ -457,7 +457,8 @@ async function openSheet() {
     if (!S.sheetLoaded) {
       S.sheetLoaded = true;
       if (snap.exists) { S.sheet = normSheet(snap.data(), driverId, month); S.exists = true; }
-      else { S.sheet = blankSheet(driverId, month); prefill(token, driverId, month); }
+      else { S.sheet = blankSheet(driverId, month); }
+      prefill(token, driverId, month);
       renderSheet(); return;
     }
     if (S.dirty || S.saving || (snap.metadata && snap.metadata.hasPendingWrites) || !snap.exists) return;
@@ -470,15 +471,21 @@ function blankSheet(driverId, month) {
   return normSheet({norm: normFor(d, month)}, driverId, month);
 }
 async function prefill(token, driverId, month) {
-  // Остаток и норма переносятся из листа за прошлый месяц, если он есть.
+  // Остаток на начало = остаток на конец прошлого месяца (по пробегу, заправкам и норме).
+  // Вручную его вводят только в самом первом листе водителя, пока лист не сдан.
   try {
     const snap = await S.db.doc('sheets/' + driverId + '_' + shiftMonth(month, -1)).get();
-    if (token !== S.token || !snap.exists || S.exists || S.dirty || !S.sheet) return;
-    const prev = normSheet(snap.data(), driverId, shiftMonth(month, -1)), pc = calc(prev);
+    if (token !== S.token || !S.sheet) return;
+    const prev = snap.exists ? normSheet(snap.data(), driverId, shiftMonth(month, -1)) : null, pc = prev ? calc(prev) : {};
+    // остаток переносится, только если в прошлом месяце его можно посчитать; иначе этот лист считается первым
+    S.hasPrev = !!prev && pc.end != null;
+    if (!S.hasPrev) { renderCar(); return; }
     let changed = false;
     if (S.sheet.norm == null && normFor(driver(), month) == null && prev.norm != null) { S.sheet.norm = prev.norm; changed = true; }
-    if (S.sheet.fuelStart == null && pc.end != null) { S.sheet.fuelStart = pc.end; S.carried = true; changed = true; }
-    if (changed) { renderCar(); recalc(); }
+    if (pc.end != null && S.sheet.status === 'draft' && S.sheet.fuelStart !== pc.end) { S.sheet.fuelStart = pc.end; changed = true; }
+    S.carried = pc.end != null;
+    renderCar(); recalc();
+    if (changed && (S.exists || S.dirty)) touch();
   } catch (e) {}
 }
 function touch() {
@@ -553,7 +560,7 @@ function renderCar() {
     ' <span class="chip ' + (d.kind === 'company' ? 'acc' : '') + '">' + (KIND[d.kind] || 'личный') + '</span>' + (d.demo ? ' <span class="chip warn">пример</span>' : '') + '</div>' +
     '<div class="carsub">' + sub + '</div></div>' +
     '<label class="fld" for="norm"><span>Норма расхода, л/100 км' + (normFor(d, S.month) != null ? ' (' + (isSummer(S.month) ? 'летняя' : 'зимняя') + ')' : '') + '</span><input id="norm" class="num" inputmode="decimal" autocomplete="off" value="' + (sh.norm ?? '') + '" placeholder="внесём позже"' + (isAdm() ? dis : ' disabled title="Норму расхода задаёт руководитель"') + '><em></em></label>' +
-    '<label class="fld" for="fuelStart"><span>Остаток на начало месяца, л</span><input id="fuelStart" class="num" inputmode="decimal" autocomplete="off" value="' + (sh.fuelStart ?? '') + '"' + (isAdm() ? dis : ' disabled title="Остаток переносится из прошлого месяца"') + '><em>' + (S.carried ? 'перенесён из прошлого месяца' : '') + '</em></label></div>';
+    '<label class="fld" for="fuelStart"><span>Остаток на начало месяца, л</span><input id="fuelStart" class="num" inputmode="decimal" autocomplete="off" value="' + (sh.fuelStart ?? '') + '"' + ((S.hasPrev === false && !locked()) ? '' : ' disabled title="' + (S.hasPrev ? 'Остаток переносится из прошлого месяца' : 'Вводится только в первом листе') + '"') + '><em>' + (S.carried ? 'перенесён из прошлого месяца' : '') + '</em></label></div>';
 }
 function tripRow(t) {
   const dis = locked() ? ' disabled' : '', [a, b] = bounds(S.month), id = esc(t.id);
