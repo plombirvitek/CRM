@@ -323,6 +323,7 @@ h3{color:var(--accent)}
     </div>
   </div>
   <div id="banner"></div>
+  <div id="wbRemind"></div>
   <nav class="tabs" id="tabs" role="tablist"></nav>
   <main id="view"></main>
 </div>
@@ -2116,7 +2117,18 @@ function qBanner(){
   if(!mine.length)return '';
   return `<div class="banner" style="display:block">${mine.map(q=>`<div class="row" style="gap:8px;align-items:center;flex-wrap:wrap"><span style="flex:1 1 260px">${q.status==='approved'?'✅ Согласована':'❌ Отклонена'} заявка № ${esc(q.num||'')} · ${esc(q.client||'')}${q.status==='rejected'&&q.rejectNote?' — '+esc(q.rejectNote):''}${q.decidedBy?' ('+esc(q.decidedBy)+')':''}</span><button class="btn sm" data-act="qa-open" data-id="${q.id}">Открыть</button><button class="btn sm" data-act="qa-seen" data-id="${q.id}" data-arg="${q.decidedAt}">Понятно</button></div>`).join('')}</div>`;
 }
-async function qBannerPaint(){const b=$('#banner');if(b&&ready&&db&&myUid&&!(regReady&&!isOwner&&!myReg))b.innerHTML=qBanner()}
+/* напоминание: заявка на топливо на следующий месяц не подана, а до конца месяца ≤5 дней (срок — последний день месяца) */
+let wbRemDone=false;
+async function wbRemind(){
+  if(wbRemDone||!ready||!db||!myUid)return;wbRemDone=true;
+  const t=new Date(),ld=new Date(t.getFullYear(),t.getMonth()+1,0).getDate(),left=ld-t.getDate();if(left>4)return;
+  const nm=new Date(t.getFullYear(),t.getMonth()+1,1),m=nm.getFullYear()+'-'+String(nm.getMonth()+1).padStart(2,'0');
+  try{const ds=await db.collection('wb/drivers').get();const my=ds.docs.map(d=>Object.assign({id:d.id},d.data())).filter(d=>d.uid===myUid);
+    for(const d of my){const r=await db.collection('wb/requests').doc(d.id+'_'+m).get();const st=r.exists?r.data().status:null;
+      if(!st||st==='draft'){const el=$('#wbRemind');el.innerHTML=`<div class="banner" style="margin:8px 0;padding:10px 14px;border-radius:10px;background:var(--warn-soft,#fff3e0);border:1px solid var(--line)">⛽ Подайте заявку на пополнение топливной карты на следующий месяц — срок до ${String(ld).padStart(2,'0')}.${String(t.getMonth()+1).padStart(2,'0')} включительно. <a href="waybill.html#req" style="font-weight:600">Заполнить заявку →</a></div>`;return}}
+  }catch(e){}
+}
+async function qBannerPaint(){wbRemind();const b=$('#banner');if(b&&ready&&db&&myUid&&!(regReady&&!isOwner&&!myReg))b.innerHTML=qBanner()}
 async function qDecide(id,ok,note){const q=byId(S.quotes,id);if(!q)return;
   const patch={status:ok?'approved':'rejected',decidedAt:Date.now(),decidedBy:({u_myakisheva:'Мякишева О.А.',u_hgT9ICEs5lsbeakc9Uzojg:'Виктор'})[myUid]||(myReg&&myReg.manager)||'Директор',rejectNote:ok?'':(note||'')};
   try{await db.collection('mgr/'+q._u+'/quotes').doc(id).update(patch);Object.assign(q,patch);for(const arr of Object.values(store.quotes||{}))(arr||[]).forEach(x=>{if(x.id===id)Object.assign(x,patch)});qBannerPaint();toast(ok?'Заявка № '+(q.num||'')+' согласована':'Заявка № '+(q.num||'')+' отклонена');render()}catch(e){toast('Не удалось сохранить решение: '+((e&&e.code)||'ошибка'))}}

@@ -107,7 +107,7 @@ window.__sbLogout=()=>{lsSet(SK,null);location.reload()};
 <title>Путевой лист ФМРус</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&display=swap">
 <style>
-html.wb-mgr #driverEdit,html.wb-mgr #driverAdd{display:none!important}
+html.wb-mgr #driverEdit,html.wb-mgr #driverAdd,html.wb-mgr .adm-only{display:none!important}
 /* Layout: одна рабочая колонка. Сверху водитель и месяц, затем итоги месяца, карточка машины, поездки и заправки; печатная форма и карточка водителя открываются поверх. Токены взяты из CRM ФМРус. */
 :root{
   --bg:#f5f4f4; --surface:#ffffff; --surface2:#eeeded; --ink:#262127; --muted:#63666A; --line:#dedddd;
@@ -161,6 +161,10 @@ input:disabled,select:disabled{background:var(--surface2);color:var(--muted)}
 input.bad{border-color:var(--bad);background:var(--bad-soft)}
 .top select{width:auto;max-width:100%;font-weight:600}
 
+.vtabs{display:flex;gap:6px;flex-wrap:wrap}.vtab{appearance:none;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:8px;padding:7px 14px;font-weight:600;cursor:pointer;font:inherit}.vtab.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}.vtab .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--warn);margin-left:6px;vertical-align:middle}
+.rq-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}.rq-ro{padding:9px 11px;border:1px dashed var(--line);border-radius:6px;min-height:38px}.rq-big{font-size:20px;font-weight:700}
+.rq-t{width:100%;border-collapse:collapse}.rq-t th{font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);text-align:left;padding:8px;border-bottom:1px solid var(--line);font-weight:600}.rq-t td{padding:8px;border-bottom:1px solid var(--line);vertical-align:middle}.rq-t .n{text-align:right;font-variant-numeric:tabular-nums}.rq-t tr.tot td{font-weight:700;border-top:2px solid var(--accent);border-bottom:0}.rq-t input{width:90px;text-align:right;padding:5px 8px;border:1px solid var(--line);border-radius:6px;background:var(--surface2);color:inherit;font:inherit}
+.rq-wrap{overflow-x:auto}
 .bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
 .month{display:flex;align-items:center;gap:4px;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:3px}
 .month button{appearance:none;border:0;background:none;width:32px;height:32px;border-radius:6px;cursor:pointer;font-size:18px;line-height:1;color:var(--muted)}
@@ -280,6 +284,9 @@ form.f{display:grid;grid-template-columns:1fr 1fr;gap:10px}
   </header>
 
   <div id="banner" class="banner" hidden></div>
+
+  <nav class="vtabs" id="vtabs"><button type="button" class="vtab on" data-v="sheet">Путевой лист</button><button type="button" class="vtab" data-v="req">Заявка на топливо</button><button type="button" class="vtab adm-only" data-v="sum">Сводка заявок</button></nav>
+  <div id="reqView" hidden style="display:flex;flex-direction:column;gap:14px"></div>
 
   <div class="bar">
     <div class="month">
@@ -429,6 +436,8 @@ function onDrivers() {
     want = pick ? pick.id : null;
   }
   $('#driverEdit').disabled = !want;
+  setTimeout(rqDot, 300);
+  if (location.hash === '#req' && !onDrivers.hashDone) { onDrivers.hashDone = true; setTimeout(() => setView('req'), 200); }
   if (want !== S.driverId) { S.driverId = want; openSheet(); }
   else if (S.sheet) {
     const d = driver();
@@ -842,6 +851,162 @@ async function saveXlsx() {
   let blob;
   try { blob = await buildXlsx(S.sheet, driver()); } catch (e) { toast('Не удалось собрать Excel.'); return; }
   offer(fileBase() + '.xlsx', blob);
+}
+
+
+/* ---------- заявки на пополнение топливной карты ----------
+   wb/requests/<водитель>_<месяц>: план пробега → литры по норме из карточки; подать до последнего дня предыдущего месяца;
+   согласует руководство (можно поправить литры). Сводка за месяц заменяет Google-таблицу. */
+const RQ = {view: 'sheet', month: shiftMonth(todayStr().slice(0, 7), 1), sumMonth: shiftMonth(todayStr().slice(0, 7), 1), doc: null, all: [], facts: {}, busy: false};
+const rqId = (did, m) => did + '_' + m;
+const lastDay = m => { const [y, mo] = m.split('-').map(Number); return new Date(y, mo, 0).getDate(); };
+const rqDeadline = m => { const pm = shiftMonth(m, -1); return pm + '-' + String(lastDay(pm)).padStart(2, '0'); };
+const rqCalc = (km, n) => (km != null && n != null) ? Math.round(km * n / 100 * 10) / 10 : null;
+const RQST = {draft: ['Черновик', ''], submitted: ['Подана, ждёт согласования', 'warn'], approved: ['Согласована', 'good']};
+function rqChip(r) { const st = r ? (r.status || 'draft') : 'none'; if (st === 'none') return '<span class="chip">Не подана</span>'; const [t, c] = RQST[st] || RQST.draft; return '<span class="chip ' + c + '">' + t + '</span>'; }
+function setView(v) {
+  RQ.view = v;
+  document.querySelectorAll('#vtabs .vtab').forEach(b => b.classList.toggle('on', b.dataset.v === v));
+  const sheet = v === 'sheet';
+  document.querySelector('.bar').hidden = !sheet; $('#main').hidden = !sheet; $('#reqView').hidden = sheet;
+  $('#driverSel').disabled = v === 'sum' || (!isAdm() && S.drivers.length < 2);
+  if (v === 'req') rqOpen(); else if (v === 'sum') rqSummary();
+}
+async function rqLoadAll(filterDid) {
+  if (!S.db) return [];
+  try { const sn = await S.db.collection('requests').get(); return sn.docs.map(d => Object.assign({id: d.id}, d.data())).filter(r => !filterDid || r.id.startsWith(filterDid + '_')); } catch (e) { return []; }
+}
+async function rqFact(did, m) {
+  const k = rqId(did, m); if (k in RQ.facts) return RQ.facts[k];
+  let v = null; try { const sn = await S.db.doc('sheets/' + k).get(); if (sn.exists) { const c = calc(normSheet(sn.data(), did, m)); v = c.km || null; } } catch (e) {}
+  return RQ.facts[k] = v;
+}
+async function rqOpen() {
+  const el = $('#reqView'), d = driver();
+  if (!d) { el.innerHTML = '<div class="panel empty">Путевой лист для вас ещё не заведён.</div>'; return; }
+  el.innerHTML = '<div class="panel empty">Загрузка…</div>';
+  const list = await rqLoadAll(d.id); RQ.doc = list.find(r => r.id === rqId(d.id, RQ.month)) || null;
+  const hist = list.filter(r => r.id !== rqId(d.id, RQ.month)).sort((a, b) => b.id.localeCompare(a.id));
+  for (const r of hist) r._fact = await rqFact(d.id, r.month || r.id.slice(-7));
+  rqRender(hist);
+}
+function rqRender(hist) {
+  const d = driver(), r = RQ.doc || {}, m = RQ.month, n = normFor(d, m), st = r.status || 'draft', ro = st === 'approved' && !isAdm();
+  const dl = rqDeadline(m), late = todayStr() > dl && st === 'draft';
+  const km = r.planKm ?? null, lit = rqCalc(km, n);
+  const lbl = s => '<span>' + s + '</span>';
+  $('#reqView').innerHTML =
+    '<section class="panel"><div class="sec-h" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">' +
+      '<div class="month"><button type="button" data-rq="prev" aria-label="Предыдущий месяц">‹</button><strong>' + monthLabel(m) + '</strong><button type="button" data-rq="next" aria-label="Следующий месяц">›</button></div>' +
+      '<h2 style="flex:1">Заявка на пополнение топливной карты</h2>' + (RQ.doc ? rqChip(RQ.doc) : '<span class="chip">Не подана</span>') + '</div>' +
+    '<p class="note" style="margin:10px 0 12px">' + (late ? '<b style="color:var(--warn)">Срок подачи прошёл (' + dmy(dl) + ').</b> Подайте заявку как можно скорее.' : 'Подать до <b>' + dmy(dl) + '</b> включительно.') + '</p>' +
+    '<div class="rq-grid">' +
+      '<label class="fld" for="rqKm">' + lbl('План пробега на месяц, км') + '<input id="rqKm" class="num" inputmode="numeric" autocomplete="off" value="' + (km ?? '') + '"' + (ro ? ' disabled' : '') + '></label>' +
+      '<div class="fld">' + lbl('Норма расхода (' + (isSummer(m) ? 'летняя' : 'зимняя') + '), л/100 км') + '<div class="rq-ro">' + (n != null ? fL(n) : 'не задана') + '</div></div>' +
+      '<div class="fld">' + lbl('Топливо · карта') + '<div class="rq-ro">' + esc(d.fuel || '—') + (d.card ? ' · №…' + esc(String(d.card).slice(-6)) : '') + '</div></div>' +
+      '<div class="fld">' + lbl('К пополнению, л') + '<div class="rq-ro rq-big" id="rqLit">' + (lit != null ? fL(lit) : '—') + '</div></div>' +
+    '</div>' +
+    '<label class="fld" for="rqCom" style="margin-top:12px">' + lbl('Комментарий: куда планируются поездки') + '<input id="rqCom" autocomplete="off" value="' + esc(r.comment || '') + '"' + (ro ? ' disabled' : '') + '></label>' +
+    (st === 'approved' ? '<p class="note" style="margin:12px 0 0">Согласовано: <b>' + fL(r.litersApproved ?? r.liters) + ' л</b>' + (r.litersApproved != null && r.liters != null && r.litersApproved !== r.liters ? ' (запрошено ' + fL(r.liters) + ' л)' : '') + '</p>' : '') +
+    '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:14px;flex-wrap:wrap"><span class="note">Литры считаются сами: план пробега × норма / 100. Руководитель может поправить сумму при согласовании.</span>' +
+      (ro ? '' : '<span style="display:flex;gap:8px">' + (st === 'submitted' && isAdm() ? '<button type="button" class="btn pri" data-rq="approve1">Согласовать</button>' : '') + '<button type="button" class="btn' + (st === 'submitted' && isAdm() ? '' : ' pri') + '" data-rq="send"' + (n == null ? ' disabled title="Нет нормы в карточке водителя"' : '') + '>' + (st === 'draft' ? 'Отправить заявку' : 'Сохранить изменения') + '</button></span>') +
+    '</div></section>' +
+    '<section class="panel"><div class="sec-h"><h2>Мои заявки</h2></div>' + (hist.length ? '<div class="rq-wrap"><table class="rq-t"><thead><tr><th>Месяц</th><th class="n">План, км</th><th class="n">Норма</th><th class="n">Запрошено, л</th><th class="n">Согласовано, л</th><th class="n">Факт пробег, км</th><th>Статус</th></tr></thead><tbody>' +
+      hist.map(h => '<tr><td>' + monthLabel(h.month || h.id.slice(-7)) + '</td><td class="n">' + fKm(h.planKm) + '</td><td class="n">' + fL(h.norm) + '</td><td class="n">' + fL(h.liters) + '</td><td class="n">' + (h.status === 'approved' ? fL(h.litersApproved ?? h.liters) : '—') + '</td><td class="n">' + fKm(h._fact) + '</td><td>' + rqChip(h) + '</td></tr>').join('') +
+      '</tbody></table></div>' : '<p class="note">Других заявок пока нет.</p>') + '</section>';
+  const upd = () => { const v = rqCalc(num($('#rqKm').value), n); $('#rqLit').textContent = v != null ? fL(v) : '—'; };
+  const k = $('#rqKm'); if (k) k.addEventListener('input', upd);
+}
+async function rqSend() {
+  if (RQ.busy) return;
+  const d = driver(), m = RQ.month, km = num($('#rqKm').value), n = normFor(d, m);
+  if (km == null || km <= 0) { toast('Укажите план пробега в километрах.'); $('#rqKm').focus(); return; }
+  const prev = RQ.doc || {};
+  const body = Object.assign({}, prev, {driverId: d.id, month: m, planKm: Math.round(km), norm: n, liters: rqCalc(Math.round(km), n), fuel: d.fuel || '', name: d.name || '', comment: $('#rqCom').value.trim(),
+    status: prev.status === 'approved' ? 'approved' : 'submitted', submittedAt: prev.submittedAt || Date.now(), updatedAt: Date.now()});
+  delete body.id; delete body._fact;
+  RQ.busy = true;
+  try { await S.db.doc('requests/' + rqId(d.id, m)).set(body); toast(prev.status ? 'Заявка обновлена.' : 'Заявка отправлена руководителю.'); }
+  catch (e) { toast('Не удалось отправить: ' + (e.code || e.message || 'ошибка')); }
+  RQ.busy = false; rqOpen();
+}
+async function rqApprove(ids, edits) {
+  if (!isAdm() || RQ.busy) return; RQ.busy = true;
+  for (const id of ids) {
+    const r = RQ.all.find(x => x.id === id) || (RQ.doc && RQ.doc.id === id ? RQ.doc : null); if (!r) continue;
+    const la = edits && edits[id] != null ? edits[id] : (r.litersApproved ?? r.liters);
+    try { await S.db.doc('requests/' + id).update({status: 'approved', litersApproved: la, decidedAt: Date.now(), decidedBy: window.WB_ME || ''}); } catch (e) { toast('Не удалось согласовать: ' + (e.code || 'ошибка')); }
+  }
+  RQ.busy = false; toast(ids.length > 1 ? 'Заявки согласованы.' : 'Заявка согласована.');
+  if (RQ.view === 'sum') rqSummary(); else rqOpen();
+}
+async function rqSummary() {
+  const el = $('#reqView'), m = RQ.sumMonth;
+  el.innerHTML = '<div class="panel empty">Загрузка…</div>';
+  const all = await rqLoadAll(); RQ.all = all.filter(r => (r.month || r.id.slice(-7)) === m);
+  const rows = S.drivers.map(d => ({d, r: RQ.all.find(x => x.id === rqId(d.id, m)) || null}));
+  let L = 0, K = 0; const miss = [];
+  const tr = rows.map(({d, r}, i) => {
+    const on = r && r.status && r.status !== 'draft', lit = r ? (r.status === 'approved' ? (r.litersApproved ?? r.liters) : r.liters) : null;
+    if (on) { L += lit || 0; K += r.planKm || 0; } else miss.push(d.name);
+    return '<tr><td>' + (i + 1) + '</td><td>' + esc(d.name || '') + (r && r.comment ? '<div class="note" style="font-size:12px">' + esc(r.comment) + '</div>' : '') + '</td><td>' + esc(d.fuel || '') + '</td><td class="n">' + (on ? fKm(r.planKm) : '—') + '</td><td class="n">' + fL(r && r.norm != null ? r.norm : normFor(d, m)) + '</td><td class="n">' +
+      (r && r.status === 'submitted' ? '<input data-la="' + esc(r.id) + '" value="' + (r.liters ?? '') + '" aria-label="Литров">' : '<b>' + (on ? fL(lit) : '—') + '</b>') + '</td><td>' + rqChip(on ? r : null) +
+      (r && r.submittedAt && r.submittedAt > 0 && r.status !== 'draft' && new Date(r.submittedAt).toISOString().slice(0, 10) > rqDeadline(m) ? ' <span class="chip warn">с опозданием</span>' : '') + '</td><td>' + (r && r.status === 'submitted' ? '<button type="button" class="btn" data-rq="ok" data-id="' + esc(r.id) + '">Согласовать</button>' : '') + '</td></tr>';
+  }).join('');
+  const pend = RQ.all.filter(r => r.status === 'submitted').length;
+  el.innerHTML = '<section class="panel"><div class="sec-h" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">' +
+    '<div class="month"><button type="button" data-rq="sprev" aria-label="Предыдущий месяц">‹</button><strong>' + monthLabel(m) + '</strong><button type="button" data-rq="snext" aria-label="Следующий месяц">›</button></div>' +
+    '<h2 style="flex:1">Заявки на пополнение топливных карт</h2><span style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn" data-rq="xlsx">Скачать Excel</button>' + (pend ? '<button type="button" class="btn pri" data-rq="okall">Согласовать все (' + pend + ')</button>' : '') + '</span></div>' +
+    '<p class="note" style="margin:8px 0 12px">Срок подачи — до ' + dmy(rqDeadline(m)) + '. Литры в поданных заявках можно поправить перед согласованием.</p>' +
+    '<div class="rq-wrap"><table class="rq-t"><thead><tr><th>№</th><th>Менеджер</th><th>Топливо</th><th class="n">План пробега, км</th><th class="n">Норма, л/100</th><th class="n">Литров</th><th>Статус</th><th></th></tr></thead><tbody>' + tr +
+    '<tr class="tot"><td></td><td>Итого по поданным</td><td></td><td class="n">' + fKm(K) + '</td><td class="n">' + (K ? fL(Math.round(L / K * 10000) / 100) : '—') + '</td><td class="n">' + fL(Math.round(L * 10) / 10) + '</td><td colspan="2" class="note">средний расход по плану</td></tr></tbody></table></div>' +
+    (miss.length ? '<p class="note" style="color:var(--warn);margin:12px 0 0">Не подали заявку: ' + miss.map(esc).join(', ') + '</p>' : '') + '</section>';
+}
+const rqEdits = () => { const o = {}; document.querySelectorAll('[data-la]').forEach(i => { const v = num(i.value); if (v != null) o[i.dataset.la] = v; }); return o; };
+async function rqXlsx() {
+  const E = await loadExcelJS(), m = RQ.sumMonth, [y, mo] = m.split('-').map(Number);
+  const wb = new E.Workbook(), ws = wb.addWorksheet(MONTHS[mo - 1] + ' ' + y);
+  const BR = 'FF7C2529', LN = {style: 'thin', color: {argb: 'FFBFBFBF'}}, ALL = {top: LN, bottom: LN, left: LN, right: LN}, F = {name: 'Arial', size: 10};
+  ws.columns = [{width: 5}, {width: 30}, {width: 12}, {width: 16}, {width: 18}, {width: 16}, {width: 22}, {width: 40}];
+  ws.mergeCells('A1:H1'); Object.assign(ws.getCell('A1'), {value: 'Заявка на пополнение топливных карт · ' + MONTHS[mo - 1].toLowerCase() + ' ' + y + ' г.', font: {...F, bold: true, size: 14, color: {argb: BR}}});
+  ws.mergeCells('A2:H2'); Object.assign(ws.getCell('A2'), {value: 'ТОО «ФМРус»', font: {...F, color: {argb: 'FF63666A'}}});
+  const hd = ['№', 'Менеджер', 'Вид топлива', 'Количество литров', 'План пробега, км', 'Расход, л/100 км', 'Статус', 'Комментарий'];
+  hd.forEach((t, i) => { const c = ws.getCell(4, i + 1); c.value = t; c.font = {...F, bold: true, color: {argb: 'FFFFFFFF'}}; c.fill = {type: 'pattern', pattern: 'solid', fgColor: {argb: BR}}; c.alignment = {horizontal: 'center', vertical: 'middle', wrapText: true}; c.border = ALL; });
+  ws.getRow(4).height = 30;
+  let r = 5; const r0 = r;
+  S.drivers.forEach((d, i) => {
+    const q = RQ.all.find(x => x.id === rqId(d.id, m)), on = q && q.status && q.status !== 'draft';
+    const vals = [i + 1, d.name || '', d.fuel || '', on ? (q.status === 'approved' ? (q.litersApproved ?? q.liters) : q.liters) : null, on ? q.planKm : null, on ? q.norm : normFor(d, m), on ? RQST[q.status][0] : 'Не подана', q && q.comment || ''];
+    vals.forEach((v, k) => { const c = ws.getCell(r, k + 1); c.value = v; c.font = F; c.border = ALL; if (k >= 3 && k <= 5) c.numFmt = k === 4 ? '#,##0' : '#,##0.0#'; if (k === 0) c.alignment = {horizontal: 'center'}; if (i % 2) c.fill = {type: 'pattern', pattern: 'solid', fgColor: {argb: 'FFFAF7F7'}}; });
+    r++;
+  });
+  r++;
+  const sum = [['Итого топлива, л', {formula: 'SUM(D' + r0 + ':D' + (r - 2) + ')'}, '#,##0.0#'], ['Общий план пробега, км', {formula: 'SUM(E' + r0 + ':E' + (r - 2) + ')'}, '#,##0'], ['Средний расход, л/100 км', {formula: 'IFERROR(ROUND(D' + (r + 1) + '/D' + (r + 2) + '*100,2),"")'}, '#,##0.00']];
+  ws.mergeCells(r, 1, r, 3); Object.assign(ws.getCell(r, 1), {value: 'Сводка за месяц', font: {...F, bold: true, color: {argb: BR}}}); r++;
+  sum.forEach(([t, f, fm]) => { ws.mergeCells(r, 1, r, 3); const a = ws.getCell(r, 1); a.value = t; a.font = {...F, bold: true}; a.border = ALL; const b = ws.getCell(r, 4); b.value = f; b.numFmt = fm; b.font = {...F, bold: true}; b.border = ALL; r++; });
+  ws.pageSetup = {orientation: 'landscape', paperSize: 9, fitToPage: true, fitToWidth: 1, fitToHeight: 0};
+  const blob = new Blob([await wb.xlsx.writeBuffer()], {type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+  offer('Заявка на топливо ' + MONTHS[mo - 1] + ' ' + y + '.xlsx', blob);
+}
+document.addEventListener('click', e => {
+  const t = e.target.closest('#vtabs .vtab'); if (t) { setView(t.dataset.v); return; }
+  const b = e.target.closest('[data-rq]'); if (!b) return; const a = b.dataset.rq;
+  if (a === 'prev' || a === 'next') { RQ.month = shiftMonth(RQ.month, a === 'prev' ? -1 : 1); rqOpen(); }
+  else if (a === 'sprev' || a === 'snext') { RQ.sumMonth = shiftMonth(RQ.sumMonth, a === 'sprev' ? -1 : 1); rqSummary(); }
+  else if (a === 'send') rqSend();
+  else if (a === 'approve1' && RQ.doc) { const v = num($('#rqKm').value); rqApprove([RQ.doc.id]); }
+  else if (a === 'ok') rqApprove([b.dataset.id], rqEdits());
+  else if (a === 'okall') rqApprove(RQ.all.filter(r => r.status === 'submitted').map(r => r.id), rqEdits());
+  else if (a === 'xlsx') rqXlsx().catch(() => toast('Не удалось собрать Excel.'));
+});
+$('#driverSel').addEventListener('change', () => { if (RQ.view === 'req') rqOpen(); });
+/* точка на вкладке, если заявка на следующий месяц ещё не подана (последние 5 дней месяца) */
+async function rqDot() {
+  const d = driver(); if (!d || !S.db) return;
+  const m = shiftMonth(todayStr().slice(0, 7), 1), day = +todayStr().slice(8, 10), ld = lastDay(todayStr().slice(0, 7));
+  let st = null; try { const sn = await S.db.doc('requests/' + rqId(d.id, m)).get(); st = sn.exists ? sn.data().status : null; } catch (e) {}
+  const btn = document.querySelector('#vtabs [data-v=req]'); if (!btn) return;
+  btn.innerHTML = 'Заявка на топливо' + ((!st || st === 'draft') && ld - day < 5 ? '<span class="dot" title="Подайте заявку на следующий месяц"></span>' : '');
 }
 
 /* ---------- запуск ---------- */
