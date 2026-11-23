@@ -555,6 +555,8 @@ const isDir=()=>!isOwner&&!!myReg&&DIRS().includes(myReg.manager);
 const isTop=()=>isOwner||isDir();
 const hd=()=>{if(isTop()||!myReg)return '';const h=headsMap();return Object.keys(h).find(r=>h[r]===myReg.manager)||''};
 const isAdm=()=>isTop()||!!hd();
+/* агроном-консультант: свой журнал выездов + каталог препаратов; его выезды видят руководитель и директор */
+const AGRO_UIDS=['u_bayalin'],AGRO_NAMES={u_bayalin:'Баялин Батыржан'};const isAgro=()=>AGRO_UIDS.includes(myUid);
 /* обычный менеджер с закреплённой областью видит все районы этой области (только чтение) */
 const myArea=()=>{if(isTop()||hd()||!myReg)return '';const ar={...AREA_DEF,...(ORG().area||{})};return ar[myReg.manager]||''};
 const dScope=(d,u)=>isOwner||(hd()?d.region===hd():(myArea()?(d.region===myArea()||u===myUid):true));
@@ -663,7 +665,7 @@ if(!wk)wk=mondayOf(todayStr());
 
 /* ---------- справочники ---------- */
 function managers(){
-  if(!isTop()){if(hd())return viewAs?[viewAs]:[...TEAM].sort((a,b)=>a.localeCompare(b,'ru'));return myReg?[myReg.manager]:[]}
+  if(!isTop()&&!isAgro()){if(hd())return viewAs?[viewAs]:[...TEAM].sort((a,b)=>a.localeCompare(b,'ru'));return myReg?[myReg.manager]:[]}
   if(viewAs)return [viewAs];
   const s=new Set(DEFAULT_MGRS.map(m=>m.n));
   REG.forEach(r=>r.manager&&s.add(r.manager));
@@ -794,6 +796,7 @@ function ensureSubs(){
   SHARED.forEach(c=>sub(c,'shared'));
   const us=new Set([myUid]);if(isAdm()){REG.forEach(r=>us.add(r.id));if(ORG().ownerUid)us.add(ORG().ownerUid);(ORG().ownerUids||[]).forEach(u=>us.add(u))}
   us.forEach(u=>PERS.forEach(c=>sub(c,u)));
+  if(isTop())AGRO_UIDS.forEach(u=>sub('agro',u));
   /* менеджер видит все хозяйства своих районов: подписываемся на карточки районов всех кабинетов (только чтение), журнал остаётся свой */
   if(!isAdm()){const du=new Set(REG.map(r=>r.id));if(ORG().ownerUid)du.add(ORG().ownerUid);(ORG().ownerUids||[]).forEach(u=>du.add(u));du.forEach(u=>{if(u!==myUid)sub('districts',u)})}
 }
@@ -1536,7 +1539,7 @@ function farmForm(id,ext){
 /* ---------- вкладки ---------- */
 function setTab(t){if(t==='data'&&!isOwner)t='dash';tab=t;ls('crm_tab',t);if(t!=='reach'){dist=''}render()}
 function renderTabs(){
-  const defs=[['dash','Сводка'],['journal','Журнал',S.activities.length],['kpi','KPI и план'],['reach','Охват',S.districts.length],['deals','Сделки',S.deals.filter(isOpen).length],['agro','Агроном',S.agro.length],['products','Препараты',CATALOG.length]].concat(isOwner?[['data','Данные']]:[]);
+  const defs=isAgro()?[['agro','Мои выезды',S.agro.length],['products','Препараты',CATALOG.length]]:[['dash','Сводка'],['journal','Журнал',S.activities.length],['kpi','KPI и план'],['reach','Охват',S.districts.length],['deals','Сделки',S.deals.filter(isOpen).length],['agro','Агроном',S.agro.length],['products','Препараты',CATALOG.length]].concat(isOwner?[['data','Данные']]:[]);
   $('#tabs').innerHTML=defs.map(([id,n,c])=>`<button class="tab" role="tab" aria-selected="${tab===id}" data-tab="${id}">${n}${c?`<span class="n">${fmt(c)}</span>`:''}</button>`).join('');
 }
 let meHtml='';
@@ -1550,6 +1553,7 @@ function renderVa(){
 function renderMe(){
   renderVa();
   const el=$('#me'); const list=managers();
+  if(isAgro()){const h2=`<option>${esc(AGRO_NAMES[myUid]||'Агроном')}</option>`;el.disabled=true;if(h2!==meHtml){meHtml=h2;el.innerHTML=h2}return}
   if(!isTop()){const h2=myReg?`<option>${esc(myReg.manager)}</option>`:'<option value="">— не выбрано —</option>';el.disabled=true;if(h2!==meHtml){meHtml=h2;el.innerHTML=h2}return}
   el.disabled=false;
   const h=`<option value="">— выберите —</option>`+list.map(m=>`<option${m===me?' selected':''}>${esc(m)}</option>`).join('');
@@ -2537,7 +2541,7 @@ function vAgro(){
   const head=`<div class="spread"><span class="muted">Отчёты агронома-консультанта о выездах и демо-опытах</span><button class="btn pri" data-act="new-agro">+ Выезд</button></div>`;
   if(!S.agro.length)return head+empty('Выездов агронома пока нет.',`<button class="btn pri" data-act="new-agro">+ Выезд</button>`);
   const a=S.agro.slice().sort((x,y)=>x.date<y.date?1:-1);
-  return head+`<div class="tbl"><table><thead><tr><th>Дата</th><th>По запросу</th><th>Хозяйство, место</th><th>Цель</th><th>Результат</th><th>Дальше</th></tr></thead><tbody>${a.map(x=>`<tr class="click" data-act="edit-agro" data-id="${x.id}"><td class="num">${fdate(x.date)}</td><td>${esc(x.requestedBy||'')}</td><td class="clip"><b>${esc(x.client)}</b><div class="muted" style="font-size:12px">${esc(x.place||'')}</div></td><td class="clip">${esc((x.goal||'').slice(0,160))}</td><td class="clip">${esc((x.result||x.work||'').slice(0,200))}</td><td class="clip muted">${esc(x.next||'')}</td></tr>`).join('')}</tbody></table></div>`;
+  return head+`<div class="tbl"><table><thead><tr><th>Дата</th><th>По запросу</th><th>Хозяйство, место</th><th>Цель</th><th>Результат</th><th>Дальше</th></tr></thead><tbody>${a.map(x=>`<tr class="click" data-act="edit-agro" data-id="${x.id}"><td class="num">${fdate(x.date)}${!isAgro()&&AGRO_NAMES[x._u]?`<div class="muted" style="font-size:11px">${esc(AGRO_NAMES[x._u])}</div>`:''}</td><td>${esc(x.requestedBy||'')}</td><td class="clip"><b>${esc(x.client)}</b><div class="muted" style="font-size:12px">${esc(x.place||'')}</div></td><td class="clip">${esc((x.goal||'').slice(0,160))}</td><td class="clip">${esc((x.result||x.work||'').slice(0,200))}</td><td class="clip muted">${esc(x.next||'')}</td></tr>`).join('')}</tbody></table></div>`;
 }
 
 /* ---------- каталог препаратов ---------- */
@@ -2830,7 +2834,8 @@ function askWho(){
 function render(){
   renderTabs(); renderMe();
   document.body.classList.toggle('lock',!(ready&&isAdm()));
-  if(ready&&db&&myUid&&!isOwner&&regReady&&!myReg){
+  if(isAgro()&&tab!=='agro'&&tab!=='products')tab='agro';
+  if(ready&&db&&myUid&&!isOwner&&!isAgro()&&regReady&&!myReg){
     $('#banner').innerHTML='<div class="banner">Вы ещё не выбрали, кто вы. <button class="btn sm pri" data-act="ask-who">Выбрать</button></div>';
     if(!whoShown&&$('#modal').hidden){whoShown=true;askWho()}
   }else if(db&&myUid)$('#banner').innerHTML=ready?qBanner():'';
