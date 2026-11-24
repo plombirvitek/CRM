@@ -1820,7 +1820,7 @@ const ST_COL={client:'#2e7d32',contact:'#e08a00',none:'#8a8f98',refused:'#c62828
 const geoKey=(rg,dn,s)=>rg+'|'+dn+'|'+s;
 function loadAsset(tag,attrs){return new Promise((res,rej)=>{const e=document.createElement(tag);Object.assign(e,attrs);e.onload=res;e.onerror=rej;document.head.appendChild(e)})}
 let leafP=null;
-function leaflet(){if(window.L&&L.markerClusterGroup)return Promise.resolve();if(leafP)return leafP;
+function loadLeaflet(){if(window.L&&L.markerClusterGroup)return Promise.resolve();if(leafP)return leafP;
   const b='https://cdnjs.cloudflare.com/ajax/libs/';
   leafP=Promise.all([loadAsset('link',{rel:'stylesheet',href:b+'leaflet/1.9.4/leaflet.min.css'}),loadAsset('link',{rel:'stylesheet',href:b+'leaflet.markercluster/1.5.3/MarkerCluster.css'}),loadAsset('link',{rel:'stylesheet',href:b+'leaflet.markercluster/1.5.3/MarkerCluster.Default.css'})])
    .then(()=>loadAsset('script',{src:b+'leaflet/1.9.4/leaflet.min.js'})).then(()=>loadAsset('script',{src:b+'leaflet.markercluster/1.5.3/leaflet.markercluster.js'}));return leafP}
@@ -1848,7 +1848,7 @@ function vMap(){
 async function drawMap(){
   const el=document.getElementById('rmap');if(!el)return;
   el.innerHTML='<div class="muted" style="padding:20px">Загружаю карту…</div>';
-  try{await leaflet()}catch(e){el.innerHTML='<div style="padding:20px">Не удалось загрузить библиотеку карты. Проверьте интернет и обновите страницу.</div>';return}
+  try{await loadLeaflet()}catch(e){el.innerHTML='<div style="padding:20px">Не удалось загрузить библиотеку карты. Проверьте интернет и обновите страницу.</div>';return}
   if(!farmIdx)await loadFarmIdx();await loadGeo();
   if(!document.getElementById('rmap'))return;el.innerHTML='';
   const view=mapObj&&mapObj._loaded?[mapObj.getCenter(),mapObj.getZoom()]:null;
