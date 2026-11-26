@@ -385,6 +385,7 @@ function normType(t){
   if(!raw)return '';
   const s=raw.toLowerCase();
   if(s.includes('выезд'))return 'Выезд';
+  if(s.includes('звон')&&s.includes('от клиент'))return IN_CALL;
   if(s.includes('звон'))return 'Звонок';
   if(/whats|вацап|ватсап|вотсап|ватс/.test(s))return 'WhatsApp';
   if(s.includes('встреч'))return 'Встреча в офисе';
@@ -529,6 +530,9 @@ const SHEET_JOURNAL='11D4xLnNy_V0RguYobs27qJwLliDTzoJSEnSJP2LZJ9o';
 const SHEET_REACH='135eB1VM0RS2Utk01eCSD7JXlo_MTS3FoooppGOR7CeI';
 const NON_JOURNAL=['Понедельник','KPI квартала','История KPI','Справочники','Агроном-консультант'];
 const TYPES=['Выезд','Звонок','WhatsApp','Встреча в офисе','Другое'];
+/* «Звонок от клиента» — дополнительный вид только для Жигаря Василия; руководство видит его в фильтре журнала */
+const IN_CALL='Звонок от клиента',IN_CALL_UIDS=['u_N1mRRDMzV2FoeLW9ulv_1g'];
+const typesFor=cur=>{const t=TYPES.slice();if(IN_CALL_UIDS.includes(myUid))t.splice(2,0,IN_CALL);if(cur&&!t.includes(cur))t.splice(2,0,cur);return t};
 const STAGES=[{id:'lead',name:'Лид'},{id:'talks',name:'Переговоры'},{id:'offer',name:'КП отправлено'},{id:'contract',name:'Договор'},{id:'ship',name:'Отгрузка'},{id:'paid',name:'Оплачено'},{id:'lost',name:'Потеряно'}];
 const RISK={green:{n:'Зелёный',d:'Благонадёжный клиент, работаем спокойно',c:'g'},yellow:{n:'Жёлтый',d:'Нужна доп. проверка, работаем с осторожностью',c:'y'},red:{n:'Красный',d:'Не работаем либо только со 100% предоплатой',c:'r'}};
 const RISK_ORD={red:0,yellow:1,green:2};
@@ -1332,7 +1336,7 @@ function actForm(id,preset){
       {k:'date',l:'Дата',t:'date',req:1},
       {k:'manager',l:'Менеджер',t:'select',opts:mgrOpts()},
       {k:'client',l:'Клиент',req:1,w:1,t:'farm'},
-      {k:'type',l:'Вид взаимодействия',t:'select',opts:TYPES.map(x=>[x,x])},
+      {k:'type',l:'Вид взаимодействия',t:'select',opts:typesFor(a&&a.type).map(x=>[x,x])},
       {k:'status',l:'Статус',t:'select',opts:STATUS_OPTS},
       {k:'contact',l:'Контактное лицо (ФИО, должность, телефон)',w:1},
       {k:'plan',l:'План / цель',t:'area',w:1,rows:2},
@@ -1640,7 +1644,7 @@ function vJournal(){
     <label>Дата<input id="qa_date" type="date" value="${todayStr()}"></label>
     <label>Менеджер<select id="qa_mgr">${managers().map(m=>`<option${m===me?' selected':''}>${esc(m)}</option>`).join('')}</select></label>
     <label style="position:relative">Клиент<input id="qa_client" data-pk="qa" placeholder="Начните вводить название хозяйства" autocomplete="off"><div id="qa_list" class="qa-list" hidden></div><div id="qa_pick" class="qa-pick"></div></label>
-    <label>Вид<select id="qa_type">${TYPES.map(t=>`<option>${t}</option>`).join('')}</select></label>
+    <label>Вид<select id="qa_type">${typesFor().map(t=>`<option>${t}</option>`).join('')}</select></label>
     <label>Контактное лицо<input id="qa_contact" placeholder="ФИО, должность, телефон"></label>
     <label class="w2">План / цель<input id="qa_plan" placeholder="Что планируете сделать"></label>
     <label>Статус<select id="qa_status">${STATUS_OPTS.map(o=>`<option value="${o[0]}"${o[0]==='done'?' selected':''}>${o[1]}</option>`).join('')}</select></label>
@@ -1649,7 +1653,7 @@ function vJournal(){
   </div>
   <div class="spread"><div class="row">${quarterSel()}
     <select id="jf-mgr" aria-label="Менеджер"><option value="">Все менеджеры</option>${managers().map(m=>`<option${m===jf.mgr?' selected':''}>${esc(m)}</option>`).join('')}</select>
-    <select id="jf-type" aria-label="Вид"><option value="">Все виды</option>${TYPES.map(t=>`<option${t===jf.type?' selected':''}>${t}</option>`).join('')}</select>
+    <select id="jf-type" aria-label="Вид"><option value="">Все виды</option>${(IN_CALL_UIDS.includes(myUid)||isTop()||S.activities.some(x=>x.type===IN_CALL)?typesFor(IN_CALL):TYPES).map(t=>`<option${t===jf.type?' selected':''}>${t}</option>`).join('')}</select>
     ${jstChips()}
     <input id="jf-q" type="search" placeholder="Поиск по клиенту и тексту" value="${esc(jf.q)}" style="min-width:220px"></div>
     <span class="muted" id="jcount"></span></div><div id="jnew"></div><div id="jlist"></div>`;
