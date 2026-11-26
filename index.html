@@ -1,4 +1,7 @@
 <!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body><script>/* Слой данных: Supabase вместо базы Claude. Тот же интерфейс window.claude.use('db'|'user'|'downloads'|'mcp'). */
+/* аварийный сброс: index.html?reset=1 очищает сохранённое в браузере (кроме входа) и открывает CRM заново */
+(()=>{try{if(/[?&]reset=1/.test(location.search)){const keep=localStorage.getItem('crm_sb_session');localStorage.clear();sessionStorage.clear();if(keep)localStorage.setItem('crm_sb_session',keep);
+  const go=()=>location.replace(location.pathname);if(window.caches&&caches.keys)caches.keys().then(ks=>Promise.all(ks.map(k=>caches.delete(k)))).then(go,go);else go();throw 0}}catch(e){if(e===0)throw e}})();
 (()=>{
 const URL_='https://teysgklvfzzfdozdtqkd.supabase.co',PUB='sb_publishable_Urb9ajGZ_a-G-uCnXAPLqw_6xNe6_jC';
 const SK='crm_sb_session';let sess=null,prof=null,loginP=null,refP=null;
