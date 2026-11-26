@@ -321,6 +321,7 @@ h3{color:var(--accent)}
       <select id="va" aria-label="Смотреть как менеджер" hidden></select>
       <a class="btn" id="planLink" href="plan.html" hidden style="text-decoration:none">План продаж</a>
       <a class="btn" id="wbLink" href="waybill.html" hidden style="text-decoration:none">Путевые листы</a>
+      <a class="btn" id="stockLink" href="stock.html" hidden style="text-decoration:none">Остатки и дебиторка</a>
       <button class="btn pri" id="newActBtn" data-act="new-act">+ Взаимодействие</button>
     </div>
   </div>
@@ -555,11 +556,13 @@ function saveOwnerUid(){const o=ORG();return put('settings','org',{...o,ownerUid
 const DIR_DEF=['Мякишева Ольга'];
 const DIRS=()=>ORG().directors||DIR_DEF;
 const isDir=()=>!isOwner&&!!myReg&&DIRS().includes(myReg.manager);
-const isTop=()=>isOwner||isDir();
+const isTop=()=>isOwner||isDir()||isAcct();
 const hd=()=>{if(isTop()||!myReg)return '';const h=headsMap();return Object.keys(h).find(r=>h[r]===myReg.manager)||''};
 const isAdm=()=>isTop()||!!hd();
 /* агроном-консультант: свой журнал выездов + каталог препаратов; его выезды видят руководитель и директор */
 const AGRO_UIDS=['u_bayalin'],AGRO_NAMES={u_bayalin:'Баялин Батыржан'};const isAgro=()=>AGRO_UIDS.includes(myUid);
+const ACCT_UIDS=['u_sirotina'];const isAcct=()=>ACCT_UIDS.includes(myUid);
+const STOCK_PUBLIC=false;/* когда раздел откроют всем: true (и stk_flags.public в базе) */
 /* обычный менеджер с закреплённой областью видит все районы этой области (только чтение) */
 const myArea=()=>{if(isTop()||hd()||!myReg)return '';const ar={...AREA_DEF,...(ORG().area||{})};return ar[myReg.manager]||''};
 const dScope=(d,u)=>isOwner||(hd()?d.region===hd():(myArea()?(d.region===myArea()||u===myUid):true));
@@ -837,7 +840,7 @@ async function init(){
   try{mcp=await window.claude?.use?.('mcp')}catch(e){mcp=null}
   let user=null;try{user=await window.claude?.use?.('user')}catch(e){}
   if(user){try{myUid=(await user.id())||'';MAPB=MAPB_UIDS.includes(myUid);isOwner=!!(await user.isOwner())}catch(e){}}
-  {const pl=document.getElementById('planLink');if(pl)pl.hidden=!isOwner;const wl=document.getElementById('wbLink');if(wl)wl.hidden=false}
+  {const pl=document.getElementById('planLink');if(pl)pl.hidden=!isOwner;const wl=document.getElementById('wbLink');if(wl)wl.hidden=isAcct();const sl=document.getElementById('stockLink');if(sl)sl.hidden=!(STOCK_PUBLIC||isOwner||isAcct())}
   if(isOwner)me=ls('crm_me')||'';
   if(!db||!myUid){ready=true;$('#banner').innerHTML='<div class="banner">Личный кабинет недоступен. Откройте страницу по ссылке из своего аккаунта Claude: иначе данные не сохранятся.</div>';render();return}
   ensureSubs();
@@ -1544,8 +1547,8 @@ function farmForm(id,ext){
 /* ---------- вкладки ---------- */
 function setTab(t){if(t==='data'&&!isOwner)t='dash';tab=t;ls('crm_tab',t);if(t!=='reach'){dist=''}render()}
 function renderTabs(){
-  {const ag=isAgro(),b1=document.getElementById('newActBtn'),b2=document.getElementById('bell');if(b1)b1.hidden=ag;if(b2)b2.hidden=ag}
-  const defs=isAgro()?[['agro','Мои выезды',S.agro.length],['products','Препараты',CATALOG.length]]:[['dash','Сводка'],['journal','Журнал',S.activities.length],['kpi','KPI и план'],['reach','Охват',S.districts.length],['deals','Сделки',S.deals.filter(isOpen).length],['agro','Агроном',S.agro.length],['products','Препараты',CATALOG.length]].concat(isOwner?[['data','Данные']]:[]);
+  {const ag=isAgro()||isAcct(),b1=document.getElementById('newActBtn'),b2=document.getElementById('bell');if(b1)b1.hidden=ag;if(b2)b2.hidden=ag}
+  const defs=isAcct()?[['deals','Сделки',S.deals.filter(isOpen).length]]:isAgro()?[['agro','Мои выезды',S.agro.length],['products','Препараты',CATALOG.length]]:[['dash','Сводка'],['journal','Журнал',S.activities.length],['kpi','KPI и план'],['reach','Охват',S.districts.length],['deals','Сделки',S.deals.filter(isOpen).length],['agro','Агроном',S.agro.length],['products','Препараты',CATALOG.length]].concat(isOwner?[['data','Данные']]:[]);
   $('#tabs').innerHTML=defs.map(([id,n,c])=>`<button class="tab" role="tab" aria-selected="${tab===id}" data-tab="${id}">${n}${c?`<span class="n">${fmt(c)}</span>`:''}</button>`).join('');
 }
 let meHtml='';
@@ -2861,7 +2864,8 @@ function render(){
   renderTabs(); renderMe();
   document.body.classList.toggle('lock',!(ready&&isAdm()));
   if(isAgro()&&tab!=='agro'&&tab!=='products')tab='agro';
-  if(ready&&db&&myUid&&!isOwner&&!isAgro()&&regReady&&!myReg){
+  if(isAcct()&&tab!=='deals')tab='deals';
+  if(ready&&db&&myUid&&!isOwner&&!isAgro()&&!isAcct()&&regReady&&!myReg){
     $('#banner').innerHTML='<div class="banner">Вы ещё не выбрали, кто вы. <button class="btn sm pri" data-act="ask-who">Выбрать</button></div>';
     if(!whoShown&&$('#modal').hidden){whoShown=true;askWho()}
   }else if(db&&myUid)$('#banner').innerHTML=ready?qBanner():'';
