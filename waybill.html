@@ -63,6 +63,9 @@ function docRef(path,id){
   id=id||rnd();
   return {id,path:path+'/'+id,
     async set(d){await ensureLogin();await rest('docs?on_conflict=coll,id',{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=minimal'},body:{coll:path,id,data:JSON.parse(JSON.stringify(d)),updated_at:new Date().toISOString()}});bump(path)},
+    async update(d){await ensureLogin();const r0=await rest('docs?coll=eq.'+enc(path)+'&id=eq.'+enc(id)+'&select=data');const a0=await r0.json();if(!a0.length)throw {code:'not_found',message:'Документ не найден'};
+      const r=await rest('docs?coll=eq.'+enc(path)+'&id=eq.'+enc(id),{method:'PATCH',headers:{Prefer:'return=representation'},body:{data:Object.assign({},a0[0].data,JSON.parse(JSON.stringify(d))),updated_at:new Date().toISOString()}});
+      const a=await r.json();if(!a.length)throw {code:'permission_denied',message:'Нет прав на изменение'};bump(path)},
     async delete(){await ensureLogin();await rest('docs?coll=eq.'+enc(path)+'&id=eq.'+enc(id),{method:'DELETE',headers:{Prefer:'return=minimal'}});bump(path)},
     async get(){await ensureLogin();const r=await rest('docs?coll=eq.'+enc(path)+'&id=eq.'+enc(id)+'&select=data');const a=await r.json();return {id,exists:!!a.length,data:()=>a.length?a[0].data:undefined}},
     onSnapshot(cb,eb){
@@ -932,12 +935,16 @@ async function rqSend() {
 }
 async function rqApprove(ids, edits) {
   if (!isAdm() || RQ.busy) return; RQ.busy = true;
+  let ok = 0; const fail = [];
   for (const id of ids) {
     const r = RQ.all.find(x => x.id === id) || (RQ.doc && RQ.doc.id === id ? RQ.doc : null); if (!r) continue;
     const la = edits && edits[id] != null ? edits[id] : (r.litersApproved ?? r.liters);
-    try { await S.db.doc('requests/' + id).update({status: 'approved', litersApproved: la, decidedAt: Date.now(), decidedBy: window.WB_ME || ''}); } catch (e) { toast('Не удалось согласовать: ' + (e.code || 'ошибка')); }
+    try { await S.db.doc('requests/' + id).update({status: 'approved', litersApproved: la, decidedAt: Date.now(), decidedBy: window.WB_ME || ''}); ok++; }
+    catch (e) { fail.push((r.name || id) + ': ' + (e.message || e.code || 'ошибка')); }
   }
-  RQ.busy = false; toast(ids.length > 1 ? 'Заявки согласованы.' : 'Заявка согласована.');
+  RQ.busy = false;
+  if (fail.length) toast('Не удалось согласовать — ' + fail.join('; '));
+  else if (ok) toast(ok > 1 ? 'Заявки согласованы: ' + ok + '.' : 'Заявка согласована.');
   if (RQ.view === 'sum') rqSummary(); else rqOpen();
 }
 async function rqSummary() {
